@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>FindAR - 位置情報を送る</title>
+<style>
+  html, body {
+    margin: 0; height: 100%;
+    background: #05050a; color: #eae6ff;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .card { width: 100%; max-width: 420px; padding: 32px 24px; box-sizing: border-box; text-align: center; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 8px; letter-spacing: 0.02em; }
+  p.desc { font-size: 13px; opacity: 0.6; line-height: 1.7; margin: 0 0 32px; }
+  button {
+    width: 100%; padding: 16px; border-radius: 12px; border: 1px solid #8f7bffaa;
+    background: #6f5bff22; color: #eae6ff; font-size: 15px; letter-spacing: 0.03em;
+    margin-bottom: 12px;
+  }
+  button:active { background: #6f5bff44; }
+  button:disabled { opacity: 0.4; }
+  #status { font-size: 13px; opacity: 0.7; min-height: 20px; margin: 16px 0; }
+  #result { display: none; margin-top: 24px; padding-top: 24px; border-top: 1px solid #6f5bff33; }
+  #link-box {
+    width: 100%; box-sizing: border-box; padding: 12px; border-radius: 8px;
+    background: #ffffff0d; border: 1px solid #ffffff1a; color: #eae6ffcc;
+    font-size: 12px; word-break: break-all; margin-bottom: 12px; text-align: left;
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>FindAR</h1>
+  <p class="desc">現在地を取得して、待ち合わせ相手に共有するリンクを作成します。</p>
+
+  <button id="send-button">現在地を送信する</button>
+  <div id="status"></div>
+
+  <div id="result">
+    <div id="link-box"></div>
+    <button id="share-button">リンクを共有</button>
+    <button id="copy-button">リンクをコピー</button>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import { getFirestore, collection, addDoc, serverTimestamp }
+  from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+// ════════════════════════════════════════════════
+// TODO: 自分のFirebaseプロジェクトの設定値に置き換えてください
+// Firebaseコンソール → プロジェクトの設定 → マイアプリ → SDK構成 で確認できます
+// ════════════════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+
+// viewer.htmlの公開先URL（GitHub Pages / Netlifyのドメインに置き換えてください）
+const VIEWER_URL = "https://your-domain.example.com/viewer.html";
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+const sendButton = document.getElementById('send-button');
+const statusEl = document.getElementById('status');
+const resultEl = document.getElementById('result');
+const linkBox = document.getElementById('link-box');
+const shareButton = document.getElementById('share-button');
+const copyButton = document.getElementById('copy-button');
+
+let shareUrl = '';
+
+sendButton.addEventListener('click', () => {
+  if (!('geolocation' in navigator)) {
+    statusEl.textContent = 'このブラウザは位置情報に対応していません';
+    return;
+  }
+
+  sendButton.disabled = true;
+  statusEl.textContent = '位置情報を取得中...';
+
+  navigator.geolocation.getCurrentPosition(
+    async (position) => {
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+
+      try {
+        statusEl.textContent = '送信中...';
+
+        // 送信時点のスナップショットとして1回だけ保存
+        const docRef = await addDoc(collection(db, 'meetups'), {
+          lat,
+          lng,
+          createdAt: serverTimestamp()
+        });
+
+        shareUrl = `${VIEWER_URL}?id=${docRef.id}`;
+        linkBox.textContent = shareUrl;
+        resultEl.style.display = 'block';
+        statusEl.textContent = '送信しました';
+        sendButton.disabled = false;
+      } catch (err) {
+        console.error('[FindAR] Firestore書き込みエラー:', err);
+        statusEl.textContent = '送信に失敗しました。時間をおいて再度お試しください';
+        sendButton.disabled = false;
+      }
+    },
+    (error) => {
+      console.error('[FindAR] 位置情報取得エラー:', error);
+      statusEl.textContent = '位置情報を取得できませんでした（許可設定をご確認ください）';
+      sendButton.disabled = false;
+    },
+    { enableHighAccuracy: true, timeout: 15000 }
+  );
+});
+
+shareButton.addEventListener('click', async () => {
+  if (!shareUrl) return;
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'FindAR', text: 'この場所にいます', url: shareUrl });
+    } catch (err) {
+      // ユーザーがキャンセルした場合など。無視してよい
+    }
+  } else {
+    copyButton.click();
+  }
+});
+
+copyButton.addEventListener('click', async () => {
+  if (!shareUrl) return;
+  try {
+    await navigator.clipboard.writeText(shareUrl);
+    statusEl.textContent = 'リンクをコピーしました';
+  } catch (err) {
+    statusEl.textContent = 'コピーに失敗しました。手動で選択してください';
+  }
+});
+</script>
+</body>
+</html>
