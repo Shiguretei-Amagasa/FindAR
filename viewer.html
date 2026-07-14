@@ -108,7 +108,20 @@ const firebaseConfig = {
   measurementId: "G-J7H2LC9FFS"
 };
 
+import { initializeAppCheck, ReCaptchaV3Provider }
+  from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js';
+
 const app = initializeApp(firebaseConfig);
+
+// ── Macでのローカルテスト用（本番公開前に必ず削除） ──
+self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+
+// TODO: 'YOUR_RECAPTCHA_SITE_KEY' をSTEP 4-1で取得したサイトキーに置き換える
+const appCheck = initializeAppCheck(app, {
+  provider: new ReCaptchaV3Provider('6LeQYFItAAAAAGaVvZx_Txa8M26qytXHou4ZXmqk'),
+  isTokenAutoRefreshEnabled: true
+});
+
 const db = getFirestore(app);
 
 // URLの ?id=xxxx を使ってFirestoreから送信者の位置情報(スナップショット)を取得する
