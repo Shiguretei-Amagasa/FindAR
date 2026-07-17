@@ -113,9 +113,6 @@ import { initializeAppCheck, ReCaptchaV3Provider }
 
 const app = initializeApp(firebaseConfig);
 
-// ── Macでのローカルテスト用（本番公開前に必ず削除） ──
-self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
-
 // TODO: 'YOUR_RECAPTCHA_SITE_KEY' をSTEP 4-1で取得したサイトキーに置き換える
 const appCheck = initializeAppCheck(app, {
   provider: new ReCaptchaV3Provider('6LeQYFItAAAAAGaVvZx_Txa8M26qytXHou4ZXmqk'),
