@@ -158,81 +158,124 @@ AFRAME.registerComponent('bloom-composer', {
   init: function () {
     const sceneEl = this.el;
     sceneEl.addEventListener('renderstart', () => {
-      const THREE = AFRAME.THREE;
+      const THREE = AFRAME.THREE; // ← A-Frame内蔵のTHREEのみを使用。別読み込みは一切しない
       const renderer = sceneEl.renderer;
       const camera = sceneEl.camera;
       const scene = sceneEl.object3D;
 
-      renderer.setClearColor(0x000000, 0); // 透過（背後のカメラ映像を活かす）
+      renderer.setClearColor(0x000000, 0);
 
-      const size = new THREE.Vector2();
-      renderer.getSize(size);
+      const rtOptions = { format: THREE.RGBAFormat, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter };
+      let w = window.innerWidth, h = window.innerHeight;
 
-      const renderScene = new RenderPass(scene, camera);
+      let sceneRT  = new THREE.WebGLRenderTarget(w, h, rtOptions);
+      let brightRT = new THREE.WebGLRenderTarget(w / 2, h / 2, rtOptions);
+      let blurRT1  = new THREE.WebGLRenderTarget(w / 2, h / 2, rtOptions);
+      let blurRT2  = new THREE.WebGLRenderTarget(w / 2, h / 2, rtOptions);
 
-      // ── ①光る部分だけを描画するcomposer(画面には出さない) ──
-      const bloomPass = new UnrealBloomPass(
-        new THREE.Vector2(size.x, size.y),
-        BLOOM_STRENGTH, BLOOM_RADIUS, BLOOM_THRESHOLD
-      );
-      const bloomComposer = new EffectComposer(renderer);
-      bloomComposer.renderToScreen = false;
-      bloomComposer.addPass(renderScene);
-      bloomComposer.addPass(bloomPass);
+      const quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+      const quadScene = new THREE.Scene();
+      const quadGeo = new THREE.PlaneGeometry(2, 2);
 
-      // ── ②ベース映像とBloomを、透明度を保ったまま合成する ──
-      const finalMaterial = new THREE.ShaderMaterial({
-        uniforms: {
-          baseTexture: { value: null },
-          bloomTexture: { value: bloomComposer.renderTarget2.texture }
-        },
-        vertexShader: `
-          varying vec2 vUv;
-          void main() {
-            vUv = uv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          }
-        `,
+      const VERT = `
+        varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+      `;
+      const brightMat = new THREE.ShaderMaterial({
+        uniforms: { tDiffuse: { value: null }, threshold: { value: BLOOM_THRESHOLD } },
+        vertexShader: VERT,
         fragmentShader: `
-          uniform sampler2D baseTexture;
-          uniform sampler2D bloomTexture;
-          varying vec2 vUv;
+          uniform sampler2D tDiffuse; uniform float threshold; varying vec2 vUv;
           void main() {
-            vec4 base = texture2D(baseTexture, vUv);
-            vec4 bloom = texture2D(bloomTexture, vUv);
-            gl_FragColor = vec4(base.rgb + bloom.rgb, base.a); // ← アルファはbase側を使う(ここが透過維持のポイント)
+            vec4 texel = texture2D(tDiffuse, vUv);
+            float brightness = dot(texel.rgb, vec3(0.2126, 0.7152, 0.0722));
+            float contrib = smoothstep(threshold, threshold + 0.2, brightness);
+            gl_FragColor = vec4(texel.rgb * contrib, texel.a * contrib);
           }
         `
       });
-      const finalPass = new ShaderPass(finalMaterial, 'baseTexture');
-      finalPass.needsSwap = true;
+      const blurMat = new THREE.ShaderMaterial({
+        uniforms: { tDiffuse: { value: null }, direction: { value: new THREE.Vector2() } },
+        vertexShader: VERT,
+        fragmentShader: `
+          uniform sampler2D tDiffuse; uniform vec2 direction; varying vec2 vUv;
+          void main() {
+            vec4 sum = vec4(0.0);
+            sum += texture2D(tDiffuse, vUv - 4.0*direction) * 0.0162162162;
+            sum += texture2D(tDiffuse, vUv - 3.0*direction) * 0.0540540541;
+            sum += texture2D(tDiffuse, vUv - 2.0*direction) * 0.1216216216;
+            sum += texture2D(tDiffuse, vUv - 1.0*direction) * 0.1945945946;
+            sum += texture2D(tDiffuse, vUv)                 * 0.2270270270;
+            sum += texture2D(tDiffuse, vUv + 1.0*direction) * 0.1945945946;
+            sum += texture2D(tDiffuse, vUv + 2.0*direction) * 0.1216216216;
+            sum += texture2D(tDiffuse, vUv + 3.0*direction) * 0.0540540541;
+            sum += texture2D(tDiffuse, vUv + 4.0*direction) * 0.0162162162;
+            gl_FragColor = sum;
+          }
+        `
+      });
+      const compositeMat = new THREE.ShaderMaterial({
+        uniforms: { baseTexture: { value: null }, bloomTexture: { value: null }, bloomStrength: { value: BLOOM_STRENGTH } },
+        vertexShader: VERT,
+        fragmentShader: `
+          uniform sampler2D baseTexture; uniform sampler2D bloomTexture; uniform float bloomStrength; varying vec2 vUv;
+          void main() {
+            vec4 base = texture2D(baseTexture, vUv);
+            vec4 bloom = texture2D(bloomTexture, vUv);
+            gl_FragColor = vec4(base.rgb + bloom.rgb * bloomStrength, base.a);
+          }
+        `,
+        transparent: true
+      });
 
-      const finalComposer = new EffectComposer(renderer);
-      finalComposer.addPass(renderScene);
-      finalComposer.addPass(finalPass);
+      const quadMesh = new THREE.Mesh(quadGeo, brightMat);
+      quadScene.add(quadMesh);
 
-      bloomComposer.setSize(size.x, size.y);
-      finalComposer.setSize(size.x, size.y);
+      function renderQuad(material, target) {
+        quadMesh.material = material;
+        renderer.setRenderTarget(target);
+        renderer.clear();
+        renderer.render(quadScene, quadCamera);
+      }
 
-      // A-Frameの通常描画を、2段階composer経由に差し替える
       const originalRender = renderer.render.bind(renderer);
-      let isComposerRendering = false;
+      let isRendering = false;
+
       renderer.render = function (s, c) {
-        if (isComposerRendering) {
-          originalRender(s, c);
-          return;
-        }
-        isComposerRendering = true;
-        bloomComposer.render();
-        finalComposer.render();
-        isComposerRendering = false;
+        if (isRendering) { originalRender(s, c); return; }
+        isRendering = true;
+
+        renderer.setRenderTarget(sceneRT);
+        renderer.clear();
+        originalRender(scene, camera);
+
+        brightMat.uniforms.tDiffuse.value = sceneRT.texture;
+        renderQuad(brightMat, brightRT);
+
+        blurMat.uniforms.tDiffuse.value = brightRT.texture;
+        blurMat.uniforms.direction.value.set(BLOOM_RADIUS / brightRT.width, 0);
+        renderQuad(blurMat, blurRT1);
+
+        blurMat.uniforms.tDiffuse.value = blurRT1.texture;
+        blurMat.uniforms.direction.value.set(0, BLOOM_RADIUS / brightRT.height);
+        renderQuad(blurMat, blurRT2);
+
+        compositeMat.uniforms.baseTexture.value = sceneRT.texture;
+        compositeMat.uniforms.bloomTexture.value = blurRT2.texture;
+        renderer.setRenderTarget(null);
+        renderer.clear();
+        renderQuad(compositeMat, null);
+
+        isRendering = false;
       };
 
       window.addEventListener('resize', () => {
-        const w = window.innerWidth, h = window.innerHeight;
+        w = window.innerWidth; h = window.innerHeight;
         renderer.setSize(w, h);
-        bloomComposer.setSize(w, h);
-        finalComposer.setSize(w, h);
+        sceneRT.setSize(w, h);
+        brightRT.setSize(w / 2, h / 2);
+        blurRT1.setSize(w / 2, h / 2);
+        blurRT2.setSize(w / 2, h / 2);
       });
     });
   }
