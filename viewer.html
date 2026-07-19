@@ -178,11 +178,20 @@ AFRAME.registerComponent('bloom-composer', {
       composer.addPass(bloomPass);
       composer.setSize(size.x, size.y);
 
-      // A-Frameの通常描画をcomposer経由に差し替える
+     // A-Frameの通常描画をcomposer経由に差し替える
       // （AScene.prototype.render が毎フレーム renderer.render(scene, camera) を呼ぶ箇所をフック）
+      // ※ composer内部でもrenderer.renderが再度呼ばれるため、
+      //   多重呼び出しを防ぐガードを入れて無限ループを回避する
       const originalRender = renderer.render.bind(renderer);
-      renderer.render = function () {
+      let isComposerRendering = false;
+      renderer.render = function (scene, camera) {
+        if (isComposerRendering) {
+          originalRender(scene, camera);
+          return;
+        }
+        isComposerRendering = true;
         composer.render();
+        isComposerRendering = false;
       };
 
       window.addEventListener('resize', () => {
