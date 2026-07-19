@@ -52,7 +52,7 @@
   id="findar-scene"
   vr-mode-ui="enabled: false"
   embedded
-  arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false; trackingMethod: best;"
+  arjs="sourceType: webcam; debugUIEnabled: false; trackingMethod: best;"
   renderer="alpha: true; antialias: true; colorManagement: true;"
   bloom-composer
 >
@@ -63,6 +63,7 @@
     id="findar-appear"
     gltf-model="url(./FindAR_appear.glb)"
     gltf-animation-once
+    gps-distance-scale
     gps-new-entity-place="latitude: 0; longitude: 0;"
     visible="true"
   ></a-entity>
@@ -72,6 +73,7 @@
     id="findar-loop"
     gltf-model="url(./FindAR_loop.glb)"
     gltf-animation-loop-trimmed="startFrame: 28; endFrame: 90; fps: 24"
+    gps-distance-scale
     gps-new-entity-place="latitude: 0; longitude: 0;"
     visible="false"
   ></a-entity>
@@ -265,6 +267,28 @@ AFRAME.registerComponent('gltf-animation-loop-trimmed', {
   },
   tick: function (t, dt) {
     if (this.mixer) this.mixer.update(dt / 1000);
+  }
+});
+
+// ════════════════════════════════════════════════
+// 距離に応じてスケールを自動調整
+// 遠いほど大きく、近いほど画面に収まる小ささにする
+// ════════════════════════════════════════════════
+AFRAME.registerComponent('gps-distance-scale', {
+  schema: {
+    minScale: { type: 'number', default: 0.3 },  // 近距離での最小スケール
+    maxScale: { type: 'number', default: 8 },     // 遠距離での最大スケール
+    factor:   { type: 'number', default: 0.08 }   // 距離1mあたりの倍率(調整用)
+  },
+  init: function () {
+    this.cameraEl = document.querySelector('a-camera');
+  },
+  tick: function () {
+    if (!this.cameraEl || !this.cameraEl.object3D) return;
+    const distance = this.cameraEl.object3D.position.distanceTo(this.el.object3D.position);
+    let scale = distance * this.data.factor;
+    scale = Math.max(this.data.minScale, Math.min(this.data.maxScale, scale));
+    this.el.object3D.scale.setScalar(scale);
   }
 });
 
