@@ -55,7 +55,6 @@
   arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false; trackingMethod: best;"
   renderer="alpha: true; antialias: true; colorManagement: true;"
   bloom-composer
-  style="display: none;"
 >
   <a-camera gps-new-camera="gpsMinDistance: 5;"></a-camera>
 
@@ -316,7 +315,6 @@ startButton.addEventListener('click', async () => {
   loopEl.setAttribute('gps-new-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
 
   startOverlay.style.display = 'none';
-  sceneEl.style.display = 'block';
   statusBar.textContent = '';
 });
 </script>
