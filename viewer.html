@@ -78,6 +78,13 @@
   ></a-entity>
 </a-scene>
 
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.150.1/build/three.module.js"
+  }
+}
+</script>
 <script type="module">
 import { EffectComposer } from 'https://unpkg.com/three@0.150.1/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass }     from 'https://unpkg.com/three@0.150.1/examples/jsm/postprocessing/RenderPass.js';
@@ -86,6 +93,8 @@ import { UnrealBloomPass } from 'https://unpkg.com/three@0.150.1/examples/jsm/po
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getFirestore, doc, getDoc }
   from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { initializeAppCheck, ReCaptchaV3Provider }
+  from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js';
 
 // ════════════════════════════════════════════════
 // 設定値
@@ -95,7 +104,7 @@ const BLOOM_RADIUS    = 0.6;   // にじみの広がり
 const BLOOM_THRESHOLD = 0.75;  // この輝度以上のピクセルだけ光る(0-1)。低いほど広範囲が光る
 
 // ════════════════════════════════════════════════
-// TODO: sender.html と同じFirebaseプロジェクトの設定値に置き換えてください
+// TODO: index.html と同じFirebaseプロジェクトの設定値に置き換えてください
 // ════════════════════════════════════════════════
 const firebaseConfig = {
   apiKey: "AIzaSyByb6EuWZ9Iy9QiR0Nw6IWRb8O_JQqpMSc",
@@ -108,12 +117,9 @@ const firebaseConfig = {
   measurementId: "G-J7H2LC9FFS"
 };
 
-import { initializeAppCheck, ReCaptchaV3Provider }
-  from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js';
-
 const app = initializeApp(firebaseConfig);
 
-// TODO: 'YOUR_RECAPTCHA_SITE_KEY' をSTEP 4-1で取得したサイトキーに置き換える
+// TODO: サイトキー(シークレットキーではない方)に置き換えてください
 const appCheck = initializeAppCheck(app, {
   provider: new ReCaptchaV3Provider('6LeQYFItAAAAAGaVvZx_Txa8M26qytXHou4ZXmqk'),
   isTokenAutoRefreshEnabled: true

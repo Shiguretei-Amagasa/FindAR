@@ -3,7 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>FindAR - 位置情報を送る</title>
+<title>FindAR</title>
+<link rel="icon" href="icon_512.png" type="image/png">
+<link rel="apple-touch-icon" href="icon_512.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#05050a">
+
 <style>
   html, body {
     margin: 0; height: 100%;
@@ -12,49 +17,70 @@
     display: flex; align-items: center; justify-content: center;
   }
   .card { width: 100%; max-width: 420px; padding: 32px 24px; box-sizing: border-box; text-align: center; }
-  h1 { font-size: 18px; font-weight: 600; margin: 0 0 8px; letter-spacing: 0.02em; }
-  p.desc { font-size: 13px; opacity: 0.6; line-height: 1.7; margin: 0 0 32px; }
+
+  /* ══ ロゴサイズ調整はここ(.logo)を編集してください ══ */
+  .logo {
+    width: min(320px, 80vw);  /* ← 横幅の上限。数値を変えるとサイズが変わる */
+    height: auto;              /* 元画像比率(735x300)を維持したまま高さは自動計算 */
+    margin: 0 auto 28px;
+    display: block;
+  }
+
+  .desc { font-size: 13px; opacity: 0.6; line-height: 1.7; margin: 0 0 8px; }
+  .btn-desc { font-size: 12px; opacity: 0.5; line-height: 1.6; margin: 8px 0 24px; }
+
   button {
     width: 100%; padding: 16px; border-radius: 12px; border: 1px solid #8f7bffaa;
     background: #6f5bff22; color: #eae6ff; font-size: 15px; letter-spacing: 0.03em;
-    margin-bottom: 12px;
   }
   button:active { background: #6f5bff44; }
   button:disabled { opacity: 0.4; }
-  #status { font-size: 13px; opacity: 0.7; min-height: 20px; margin: 16px 0; }
-  #result { display: none; margin-top: 24px; padding-top: 24px; border-top: 1px solid #6f5bff33; }
-  #link-box {
-    width: 100%; box-sizing: border-box; padding: 12px; border-radius: 8px;
-    background: #ffffff0d; border: 1px solid #ffffff1a; color: #eae6ffcc;
-    font-size: 12px; word-break: break-all; margin-bottom: 12px; text-align: left;
+
+  #toast {
+    position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+    background: #1a1a2e; border: 1px solid #6f5bff55; color: #eae6ff;
+    padding: 12px 20px; border-radius: 999px; font-size: 13px;
+    opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+    white-space: nowrap;
   }
+  #toast.show { opacity: 1; }
+
+  #page-2 { display: none; }
+  #page-2 button + .btn-desc { margin-bottom: 24px; }
+  #page-2 button:last-of-type { margin-top: 4px; }
 </style>
 </head>
 <body>
 
-<div class="card">
-  <h1>FindAR</h1>
-  <p class="desc">現在地を取得して、待ち合わせ相手に共有するリンクを作成します。</p>
-
-  <button id="send-button">現在地を送信する</button>
-  <div id="status"></div>
-
-  <div id="result">
-    <div id="link-box"></div>
-    <button id="share-button">リンクを共有</button>
-    <button id="copy-button">リンクをコピー</button>
-  </div>
+<!-- ══ ページ1：初回の送信 ══ -->
+<div class="card" id="page-1">
+  <img src="FindAR_logo_w.png" alt="FindAR" class="logo">
+  <p class="desc">現在地を取得し、待ち合わせ相手に共有するリンクを作成します。</p>
+  <button id="share-initial">Share where you're</button>
+  <p class="btn-desc">タップすると現在地を取得し、共有用リンクをコピーします。</p>
 </div>
+
+<!-- ══ ページ2：送信後の更新・再共有 ══ -->
+<div class="card" id="page-2">
+  <img src="FindAR_logo_w.png" alt="FindAR" class="logo">
+
+  <button id="update-location">Update</button>
+  <p class="btn-desc">現在地を再取得し、新しいリンクをコピーします。移動した場合はこちら。</p>
+
+  <button id="share-again">Share where you're</button>
+  <p class="btn-desc">直前に発行したリンクをもう一度コピーします。</p>
+</div>
+
+<div id="toast"></div>
 
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getFirestore, collection, addDoc, serverTimestamp }
   from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { initializeAppCheck, ReCaptchaV3Provider }
+  from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js';
 
-// ════════════════════════════════════════════════
-// TODO: 自分のFirebaseプロジェクトの設定値に置き換えてください
-// Firebaseコンソール → プロジェクトの設定 → マイアプリ → SDK構成 で確認できます
-// ════════════════════════════════════════════════
+// TODO: 実際のFirebaseプロジェクトの値に置き換えてください
 const firebaseConfig = {
   apiKey: "AIzaSyByb6EuWZ9Iy9QiR0Nw6IWRb8O_JQqpMSc",
   authDomain: "findar-ae099.firebaseapp.com",
@@ -66,15 +92,15 @@ const firebaseConfig = {
   measurementId: "G-J7H2LC9FFS"
 };
 
-// viewer.htmlの公開先URL（GitHub Pages / Netlifyのドメインに置き換えてください）
+// viewer.htmlの公開URL
 const VIEWER_URL = "https://shiguretei-amagasa.github.io/FindAR/viewer.html";
-
-import { initializeAppCheck, ReCaptchaV3Provider }
-  from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js';
 
 const app = initializeApp(firebaseConfig);
 
-// TODO: 'YOUR_RECAPTCHA_SITE_KEY' をSTEP 4-1で取得したサイトキーに置き換える
+// ── ローカル(Mac)でテストする時だけ、下の1行のコメントを外してください ──
+// self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+
+// TODO: サイトキー(シークレットキーではない方)に置き換えてください
 const appCheck = initializeAppCheck(app, {
   provider: new ReCaptchaV3Provider('6LeQYFItAAAAAGaVvZx_Txa8M26qytXHou4ZXmqk'),
   isTokenAutoRefreshEnabled: true
@@ -82,79 +108,95 @@ const appCheck = initializeAppCheck(app, {
 
 const db = getFirestore(app);
 
-const sendButton = document.getElementById('send-button');
-const statusEl = document.getElementById('status');
-const resultEl = document.getElementById('result');
-const linkBox = document.getElementById('link-box');
-const shareButton = document.getElementById('share-button');
-const copyButton = document.getElementById('copy-button');
+const page1 = document.getElementById('page-1');
+const page2 = document.getElementById('page-2');
+const shareInitialBtn = document.getElementById('share-initial');
+const updateBtn = document.getElementById('update-location');
+const shareAgainBtn = document.getElementById('share-again');
+const toastEl = document.getElementById('toast');
 
 let shareUrl = '';
 
-sendButton.addEventListener('click', () => {
-  if (!('geolocation' in navigator)) {
-    statusEl.textContent = 'このブラウザは位置情報に対応していません';
-    return;
-  }
+function showToast(message) {
+  toastEl.textContent = message;
+  toastEl.classList.add('show');
+  setTimeout(() => toastEl.classList.remove('show'), 2500);
+}
 
-  sendButton.disabled = true;
-  statusEl.textContent = '位置情報を取得中...';
-
-  navigator.geolocation.getCurrentPosition(
-    async (position) => {
-      const lat = position.coords.latitude;
-      const lng = position.coords.longitude;
-
-      try {
-        statusEl.textContent = '送信中...';
-
-        // 送信時点のスナップショットとして1回だけ保存
-        const docRef = await addDoc(collection(db, 'meetups'), {
-          lat,
-          lng,
-          createdAt: serverTimestamp()
-        });
-
-        shareUrl = `${VIEWER_URL}?id=${docRef.id}`;
-        linkBox.textContent = shareUrl;
-        resultEl.style.display = 'block';
-        statusEl.textContent = '送信しました';
-        sendButton.disabled = false;
-      } catch (err) {
-        console.error('[FindAR] Firestore書き込みエラー:', err);
-        statusEl.textContent = '送信に失敗しました。時間をおいて再度お試しください';
-        sendButton.disabled = false;
-      }
-    },
-    (error) => {
-      console.error('[FindAR] 位置情報取得エラー:', error);
-      statusEl.textContent = '位置情報を取得できませんでした（許可設定をご確認ください）';
-      sendButton.disabled = false;
-    },
-    { enableHighAccuracy: true, timeout: 15000 }
-  );
-});
-
-shareButton.addEventListener('click', async () => {
-  if (!shareUrl) return;
-  if (navigator.share) {
-    try {
-      await navigator.share({ title: 'FindAR', text: 'この場所にいます', url: shareUrl });
-    } catch (err) {
-      // ユーザーがキャンセルした場合など。無視してよい
+function getCurrentPosition() {
+  return new Promise((resolve, reject) => {
+    if (!('geolocation' in navigator)) {
+      reject(new Error('このブラウザは位置情報に対応していません'));
+      return;
     }
-  } else {
-    copyButton.click();
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 15000
+    });
+  });
+}
+
+// 現在地取得 → Firestore書き込み(TTL付き) → リンク生成 → クリップボードへコピー
+async function captureAndShare(triggerButton) {
+  triggerButton.disabled = true;
+  try {
+    const position = await getCurrentPosition();
+    const lat = position.coords.latitude;
+    const lng = position.coords.longitude;
+
+    const docRef = await addDoc(collection(db, 'meetups'), {
+      lat,
+      lng,
+      createdAt: serverTimestamp()
+    });
+
+    shareUrl = `${VIEWER_URL}?id=${docRef.id}`;
+    await navigator.clipboard.writeText(shareUrl);
+
+    showToast('位置情報をコピーしました。');
+
+    if (page1.style.display !== 'none' && page1.style.display !== '') {
+      // page-1からの初回実行 → page-2へ切り替え
+    }
+  } catch (err) {
+    console.error('[FindAR] 送信エラー:', err);
+    if (err.code === 1) {
+      showToast('位置情報の利用が許可されていません');
+    } else if (err.code === 2) {
+      showToast('位置情報を取得できませんでした');
+    } else if (err.code === 3) {
+      showToast('位置情報の取得がタイムアウトしました');
+    } else {
+      showToast('送信に失敗しました。もう一度お試しください');
+    }
+  } finally {
+    triggerButton.disabled = false;
+  }
+}
+
+// ── ページ1：初回送信 ──
+shareInitialBtn.addEventListener('click', async () => {
+  await captureAndShare(shareInitialBtn);
+  if (shareUrl) {
+    page1.style.display = 'none';
+    page2.style.display = 'block';
   }
 });
 
-copyButton.addEventListener('click', async () => {
+// ── ページ2：Update(現在地を再取得して送り直す) ──
+updateBtn.addEventListener('click', async () => {
+  await captureAndShare(updateBtn);
+});
+
+// ── ページ2：Share where you're(直前のリンクを再コピーのみ) ──
+shareAgainBtn.addEventListener('click', async () => {
   if (!shareUrl) return;
   try {
     await navigator.clipboard.writeText(shareUrl);
-    statusEl.textContent = 'リンクをコピーしました';
+    showToast('位置情報をコピーしました。');
   } catch (err) {
-    statusEl.textContent = 'コピーに失敗しました。手動で選択してください';
+    console.error('[FindAR] コピー失敗:', err);
+    showToast('コピーに失敗しました');
   }
 });
 </script>
