@@ -400,10 +400,14 @@ startButton.addEventListener('click', async () => {
   }
 
   const target = await fetchTargetLocationFromFirebase();
+  console.log('[FindAR診断] 送信された座標:', target.lat, target.lng);
   if (isNaN(target.lat) || isNaN(target.lng)) {
     statusBar.textContent = '相手の位置情報を取得できませんでした';
     return;
   }
+  navigator.geolocation.getCurrentPosition((pos) => {
+  console.log('[FindAR診断] 自分の現在地:', pos.coords.latitude, pos.coords.longitude);
+});
 
   appearEl.setAttribute('gps-new-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
   loopEl.setAttribute('gps-new-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
