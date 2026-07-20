@@ -23,7 +23,12 @@
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     background: #05050a; color: #eae6ff; text-align: center; padding: 24px;
   }
-  #start-overlay h1 { font-size: 18px; font-weight: 600; margin: 0 0 8px; letter-spacing: 0.02em; }
+  .logo {
+  width: min(320px, 80vw);
+  height: auto;
+  margin: 0 auto 12px;
+  display: block;
+}
   #start-overlay p { font-size: 13px; opacity: 0.6; margin: 0 0 28px; line-height: 1.6; }
   #start-button {
     padding: 14px 36px; border-radius: 999px; border: 1px solid #8f7bffaa;
@@ -45,11 +50,11 @@
 </head>
 <body>
 
-<div id="start-overlay">
-  <h1>FindAR</h1>
-  <p>相手のいる場所にホログラムが表示されます。<br>カメラと位置情報の使用を許可してください。</p>
-  <button id="start-button">ARを開始</button>
-</div>
+  <div id="start-overlay">
+    <img src="FindAR_logo_w.png" alt="FindAR" class="logo">
+    <p>相手のいる場所にホログラムが表示されます。<br>カメラと位置情報の使用を許可してください。</p>
+    <button id="start-button">ARを開始</button>
+  </div>
 
 <div id="status-bar"></div>
 <div id="distance-display"></div>
@@ -429,6 +434,7 @@ startButton.addEventListener('click', async () => {
   { enableHighAccuracy: true, timeout: 15000 }
 );
 
+  console.log('[FindAR診断] setAttribute実行直前の値:', target.lat, target.lng);
   appearEl.setAttribute('gps-new-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
   loopEl.setAttribute('gps-new-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
 
