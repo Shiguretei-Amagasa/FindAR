@@ -405,9 +405,15 @@ startButton.addEventListener('click', async () => {
     statusBar.textContent = '相手の位置情報を取得できませんでした';
     return;
   }
-  navigator.geolocation.getCurrentPosition((pos) => {
-  console.log('[FindAR診断] 自分の現在地:', pos.coords.latitude, pos.coords.longitude);
-});
+  navigator.geolocation.getCurrentPosition(
+  (pos) => {
+    console.log('[FindAR診断] 自分の現在地:', pos.coords.latitude, pos.coords.longitude);
+  },
+  (err) => {
+    console.log('[FindAR診断] 自分の現在地の取得に失敗:', err.code, err.message);
+  },
+  { enableHighAccuracy: true, timeout: 15000 }
+);
 
   appearEl.setAttribute('gps-new-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
   loopEl.setAttribute('gps-new-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
