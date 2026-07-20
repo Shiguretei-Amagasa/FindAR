@@ -36,6 +36,11 @@
     z-index: 500; text-align: center; color: #eae6ffcc; font-size: 12px;
     letter-spacing: 0.05em; pointer-events: none; text-shadow: 0 1px 4px #000;
   }
+  #distance-display {
+  position: fixed; bottom: env(safe-area-inset-bottom, 16px); left: 0; right: 0;
+  z-index: 500; text-align: center; color: #eae6ffcc; font-size: 14px;
+  font-weight: 600; letter-spacing: 0.05em; pointer-events: none; text-shadow: 0 1px 4px #000;
+}
 </style>
 </head>
 <body>
@@ -47,6 +52,7 @@
 </div>
 
 <div id="status-bar"></div>
+<div id="distance-display"></div>
 
 <a-scene
   id="findar-scene"
@@ -359,6 +365,14 @@ AFRAME.registerComponent('gps-distance-scale', {
     let scale = distance * this.data.factor;
     scale = Math.max(this.data.minScale, Math.min(this.data.maxScale, scale));
     this.el.object3D.scale.setScalar(scale);
+
+    // 今表示されているオブジェクトの距離だけを画面に表示する
+    if (this.el.getAttribute('visible')) {
+      const displayEl = document.getElementById('distance-display');
+      if (displayEl) {
+        displayEl.textContent = `対象まで: 約${distance.toFixed(1)}m`;
+      }
+    }
   }
 });
 
