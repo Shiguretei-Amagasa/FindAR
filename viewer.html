@@ -68,25 +68,6 @@
 >
   <a-camera gps-new-camera="gpsMinDistance: 5;"></a-camera>
 
-  <!-- 出現アニメーション（0-28f、1回再生） -->
-  <a-entity
-    id="findar-appear"
-    gltf-model="url(./FindAR_appear.glb)"
-    gltf-animation-once
-    gps-distance-scale
-    gps-new-entity-place="latitude: 0; longitude: 0;"
-    visible="true"
-  ></a-entity>
-
-  <!-- ループアニメーション（元データは28-90f。JS側で切り出して0起点ループ） -->
-  <a-entity
-    id="findar-loop"
-    gltf-model="url(./FindAR_loop.glb)"
-    gltf-animation-loop-trimmed="startFrame: 28; endFrame: 90; fps: 24"
-    gps-distance-scale
-    gps-new-entity-place="latitude: 0; longitude: 0;"
-    visible="false"
-  ></a-entity>
 </a-scene>
 
 <script type="importmap">
@@ -382,15 +363,36 @@ AFRAME.registerComponent('gps-distance-scale', {
 });
 
 // ════════════════════════════════════════════════
-// シーケンス制御：appear終了 → loop表示に切り替え
+// エンティティを「正しい座標が判明してから」動的に生成する
 // ════════════════════════════════════════════════
-const appearEl = document.querySelector('#findar-appear');
-const loopEl = document.querySelector('#findar-loop');
+let appearEl = null;
+let loopEl = null;
 
-appearEl.addEventListener('findar-sequence-finished', () => {
-  appearEl.setAttribute('visible', false);
-  loopEl.setAttribute('visible', true);
-});
+function createFindAREntities(lat, lng) {
+  appearEl = document.createElement('a-entity');
+  appearEl.setAttribute('id', 'findar-appear');
+  appearEl.setAttribute('gltf-model', 'url(./FindAR_appear.glb)');
+  appearEl.setAttribute('gltf-animation-once', '');
+  appearEl.setAttribute('gps-distance-scale', '');
+  appearEl.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lng};`);
+  appearEl.setAttribute('visible', 'true');
+
+  loopEl = document.createElement('a-entity');
+  loopEl.setAttribute('id', 'findar-loop');
+  loopEl.setAttribute('gltf-model', 'url(./FindAR_loop.glb)');
+  loopEl.setAttribute('gltf-animation-loop-trimmed', 'startFrame: 28; endFrame: 90; fps: 24');
+  loopEl.setAttribute('gps-distance-scale', '');
+  loopEl.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lng};`);
+  loopEl.setAttribute('visible', 'false');
+
+  appearEl.addEventListener('findar-sequence-finished', () => {
+    appearEl.setAttribute('visible', false);
+    loopEl.setAttribute('visible', true);
+  });
+
+  sceneEl.appendChild(appearEl);
+  sceneEl.appendChild(loopEl);
+}
 
 // ════════════════════════════════════════════════
 // 起動フロー：タップでカメラ・位置情報・モーションセンサーの許可を取得
@@ -434,9 +436,7 @@ startButton.addEventListener('click', async () => {
   { enableHighAccuracy: true, timeout: 15000 }
 );
 
-  console.log('[FindAR診断] setAttribute実行直前の値:', target.lat, target.lng);
-  appearEl.setAttribute('gps-new-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
-  loopEl.setAttribute('gps-new-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
+createFindAREntities(target.lat, target.lng);
 
   startOverlay.style.display = 'none';
   statusBar.textContent = '';
