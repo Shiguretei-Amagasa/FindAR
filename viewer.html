@@ -11,24 +11,24 @@
 <style>
   html, body {
     margin: 0; padding: 0; height: 100%; overflow: hidden;
+    /* 背景色は指定しない：AR.jsのカメラ映像(z-index:-2)をそのまま見せるため */
     font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
   }
   a-scene canvas {
-    background: transparent !important; /* カメラ映像を透かすため必須 */
+    background: transparent !important;
   }
 
-  /* ── 起動前オーバーレイ（iOSはユーザー操作が無いとセンサー許可が取れないため） ── */
   #start-overlay {
     position: fixed; inset: 0; z-index: 999;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     background: #05050a; color: #eae6ff; text-align: center; padding: 24px;
   }
   .logo {
-  width: min(320px, 80vw);
-  height: auto;
-  margin: 0 auto 12px;
-  display: block;
-}
+    width: min(320px, 80vw);
+    height: auto;
+    margin: 0 auto 20px;
+    display: block;
+  }
   #start-overlay p { font-size: 13px; opacity: 0.6; margin: 0 0 28px; line-height: 1.6; }
   #start-button {
     padding: 14px 36px; border-radius: 999px; border: 1px solid #8f7bffaa;
@@ -42,54 +42,40 @@
     letter-spacing: 0.05em; pointer-events: none; text-shadow: 0 1px 4px #000;
   }
   #distance-display {
-  position: fixed; bottom: env(safe-area-inset-bottom, 16px); left: 0; right: 0;
-  z-index: 500; text-align: center; color: #eae6ffcc; font-size: 14px;
-  font-weight: 600; letter-spacing: 0.05em; pointer-events: none; text-shadow: 0 1px 4px #000;
-}
+    position: fixed; bottom: env(safe-area-inset-bottom, 16px); left: 0; right: 0;
+    z-index: 500; text-align: center; color: #eae6ffcc; font-size: 14px;
+    font-weight: 600; letter-spacing: 0.05em; pointer-events: none; text-shadow: 0 1px 4px #000;
+  }
 </style>
 </head>
 <body>
 
-  <div id="start-overlay">
-    <img src="FindAR_logo_w.png" alt="FindAR" class="logo">
-    <p>相手のいる場所にホログラムが表示されます。<br>カメラと位置情報の使用を許可してください。</p>
-    <button id="start-button">ARを開始</button>
-  </div>
+<div id="start-overlay">
+  <img src="FindAR_logo_w.png" alt="FindAR" class="logo">
+  <p>相手のいる場所にホログラムが表示されます。<br>カメラと位置情報の使用を許可してください。</p>
+  <button id="start-button">ARを開始</button>
+</div>
 
 <div id="status-bar"></div>
 <div id="distance-display"></div>
 
+<!-- GPS ARに必要な最小構成。ホログラム用エンティティは実際の座標が判明してから動的に生成する -->
 <a-scene
   id="findar-scene"
   vr-mode-ui="enabled: false"
   embedded
-  arjs="sourceType: webcam; debugUIEnabled: false; trackingMethod: best;"
+  arjs="sourceType: webcam; debugUIEnabled: false;"
   renderer="alpha: true; antialias: true; colorManagement: true;"
 >
   <a-camera gps-new-camera="gpsMinDistance: 5;"></a-camera>
-
 </a-scene>
 
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.147.0/build/three.module.js"
-  }
-}
-</script>
 <script type="module">
-  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
-  import { getFirestore, doc, getDoc }
-    from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
-  import { initializeAppCheck, ReCaptchaV3Provider }
-    from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js';
-
-// ════════════════════════════════════════════════
-// 設定値
-// ════════════════════════════════════════════════
-const BLOOM_STRENGTH  = 1.2;   // 光の強さ
-const BLOOM_RADIUS    = 0.6;   // にじみの広がり
-const BLOOM_THRESHOLD = 0.75;  // この輝度以上のピクセルだけ光る(0-1)。低いほど広範囲が光る
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import { getFirestore, doc, getDoc }
+  from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { initializeAppCheck, ReCaptchaV3Provider }
+  from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js';
 
 // ════════════════════════════════════════════════
 // TODO: index.html と同じFirebaseプロジェクトの設定値に置き換えてください
@@ -115,14 +101,15 @@ const appCheck = initializeAppCheck(app, {
 
 const db = getFirestore(app);
 
-// URLの ?id=xxxx を使ってFirestoreから送信者の位置情報(スナップショット)を取得する
+// ════════════════════════════════════════════════
+// URLの ?id=xxxx を使ってFirestoreから送信者の位置情報を取得する
+// ════════════════════════════════════════════════
 async function fetchTargetLocationFromFirebase() {
   const params = new URLSearchParams(location.search);
   const meetupId = params.get('id');
   if (!meetupId) {
     return { lat: NaN, lng: NaN };
   }
-
   try {
     const snap = await getDoc(doc(db, 'meetups', meetupId));
     if (!snap.exists()) {
@@ -135,137 +122,6 @@ async function fetchTargetLocationFromFirebase() {
     return { lat: NaN, lng: NaN };
   }
 }
-
-// ════════════════════════════════════════════════
-// Bloomコンポーネント：シーン全体にUnrealBloomPassをかける
-// カメラ映像(DOM video)の透過を維持するため clearColor alpha=0 で運用
-// ════════════════════════════════════════════════
-AFRAME.registerComponent('bloom-composer', {
-  init: function () {
-    const sceneEl = this.el;
-    sceneEl.addEventListener('renderstart', () => {
-      const THREE = AFRAME.THREE; // ← A-Frame内蔵のTHREEのみを使用。別読み込みは一切しない
-      const renderer = sceneEl.renderer;
-      const camera = sceneEl.camera;
-      const scene = sceneEl.object3D;
-
-      renderer.setClearColor(0x000000, 0);
-
-      const rtOptions = { format: THREE.RGBAFormat, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter };
-      let w = window.innerWidth, h = window.innerHeight;
-
-      let sceneRT  = new THREE.WebGLRenderTarget(w, h, rtOptions);
-      let brightRT = new THREE.WebGLRenderTarget(w / 2, h / 2, rtOptions);
-      let blurRT1  = new THREE.WebGLRenderTarget(w / 2, h / 2, rtOptions);
-      let blurRT2  = new THREE.WebGLRenderTarget(w / 2, h / 2, rtOptions);
-
-      const quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-      const quadScene = new THREE.Scene();
-      const quadGeo = new THREE.PlaneGeometry(2, 2);
-
-      const VERT = `
-        varying vec2 vUv;
-        void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
-      `;
-      const brightMat = new THREE.ShaderMaterial({
-        uniforms: { tDiffuse: { value: null }, threshold: { value: BLOOM_THRESHOLD } },
-        vertexShader: VERT,
-        fragmentShader: `
-          uniform sampler2D tDiffuse; uniform float threshold; varying vec2 vUv;
-          void main() {
-            vec4 texel = texture2D(tDiffuse, vUv);
-            float brightness = dot(texel.rgb, vec3(0.2126, 0.7152, 0.0722));
-            float contrib = smoothstep(threshold, threshold + 0.2, brightness);
-            gl_FragColor = vec4(texel.rgb * contrib, texel.a * contrib);
-          }
-        `
-      });
-      const blurMat = new THREE.ShaderMaterial({
-        uniforms: { tDiffuse: { value: null }, direction: { value: new THREE.Vector2() } },
-        vertexShader: VERT,
-        fragmentShader: `
-          uniform sampler2D tDiffuse; uniform vec2 direction; varying vec2 vUv;
-          void main() {
-            vec4 sum = vec4(0.0);
-            sum += texture2D(tDiffuse, vUv - 4.0*direction) * 0.0162162162;
-            sum += texture2D(tDiffuse, vUv - 3.0*direction) * 0.0540540541;
-            sum += texture2D(tDiffuse, vUv - 2.0*direction) * 0.1216216216;
-            sum += texture2D(tDiffuse, vUv - 1.0*direction) * 0.1945945946;
-            sum += texture2D(tDiffuse, vUv)                 * 0.2270270270;
-            sum += texture2D(tDiffuse, vUv + 1.0*direction) * 0.1945945946;
-            sum += texture2D(tDiffuse, vUv + 2.0*direction) * 0.1216216216;
-            sum += texture2D(tDiffuse, vUv + 3.0*direction) * 0.0540540541;
-            sum += texture2D(tDiffuse, vUv + 4.0*direction) * 0.0162162162;
-            gl_FragColor = sum;
-          }
-        `
-      });
-      const compositeMat = new THREE.ShaderMaterial({
-        uniforms: { baseTexture: { value: null }, bloomTexture: { value: null }, bloomStrength: { value: BLOOM_STRENGTH } },
-        vertexShader: VERT,
-        fragmentShader: `
-          uniform sampler2D baseTexture; uniform sampler2D bloomTexture; uniform float bloomStrength; varying vec2 vUv;
-          void main() {
-            vec4 base = texture2D(baseTexture, vUv);
-            vec4 bloom = texture2D(bloomTexture, vUv);
-            gl_FragColor = vec4(base.rgb + bloom.rgb * bloomStrength, base.a);
-          }
-        `,
-        transparent: true
-      });
-
-      const quadMesh = new THREE.Mesh(quadGeo, brightMat);
-      quadScene.add(quadMesh);
-
-      function renderQuad(material, target) {
-        quadMesh.material = material;
-        renderer.setRenderTarget(target);
-        renderer.clear();
-        renderer.render(quadScene, quadCamera);
-      }
-
-      const originalRender = renderer.render.bind(renderer);
-      let isRendering = false;
-
-      renderer.render = function (s, c) {
-        if (isRendering) { originalRender(s, c); return; }
-        isRendering = true;
-
-        renderer.setRenderTarget(sceneRT);
-        renderer.clear();
-        originalRender(scene, camera);
-
-        brightMat.uniforms.tDiffuse.value = sceneRT.texture;
-        renderQuad(brightMat, brightRT);
-
-        blurMat.uniforms.tDiffuse.value = brightRT.texture;
-        blurMat.uniforms.direction.value.set(BLOOM_RADIUS / brightRT.width, 0);
-        renderQuad(blurMat, blurRT1);
-
-        blurMat.uniforms.tDiffuse.value = blurRT1.texture;
-        blurMat.uniforms.direction.value.set(0, BLOOM_RADIUS / brightRT.height);
-        renderQuad(blurMat, blurRT2);
-
-        compositeMat.uniforms.baseTexture.value = sceneRT.texture;
-        compositeMat.uniforms.bloomTexture.value = blurRT2.texture;
-        renderer.setRenderTarget(null);
-        renderer.clear();
-        renderQuad(compositeMat, null);
-
-        isRendering = false;
-      };
-
-      window.addEventListener('resize', () => {
-        w = window.innerWidth; h = window.innerHeight;
-        renderer.setSize(w, h);
-        sceneRT.setSize(w, h);
-        brightRT.setSize(w / 2, h / 2);
-        blurRT1.setSize(w / 2, h / 2);
-        blurRT2.setSize(w / 2, h / 2);
-      });
-    });
-  }
-});
 
 // ════════════════════════════════════════════════
 // 出現アニメーション：1回再生 → 完了イベント発火
@@ -333,14 +189,13 @@ AFRAME.registerComponent('gltf-animation-loop-trimmed', {
 });
 
 // ════════════════════════════════════════════════
-// 距離に応じてスケールを自動調整
-// 遠いほど大きく、近いほど画面に収まる小ささにする
+// 距離に応じたスケール調整 + 画面下部への距離表示
 // ════════════════════════════════════════════════
 AFRAME.registerComponent('gps-distance-scale', {
   schema: {
-    minScale: { type: 'number', default: 0.3 },  // 近距離での最小スケール
-    maxScale: { type: 'number', default: 8 },     // 遠距離での最大スケール
-    factor:   { type: 'number', default: 0.08 }   // 距離1mあたりの倍率(調整用)
+    minScale: { type: 'number', default: 0.3 },
+    maxScale: { type: 'number', default: 8 },
+    factor:   { type: 'number', default: 0.08 }
   },
   init: function () {
     this.cameraEl = document.querySelector('a-camera');
@@ -352,24 +207,21 @@ AFRAME.registerComponent('gps-distance-scale', {
     scale = Math.max(this.data.minScale, Math.min(this.data.maxScale, scale));
     this.el.object3D.scale.setScalar(scale);
 
-    // 今表示されているオブジェクトの距離だけを画面に表示する
     if (this.el.getAttribute('visible')) {
       const displayEl = document.getElementById('distance-display');
-      if (displayEl) {
-        displayEl.textContent = `対象まで: 約${distance.toFixed(1)}m`;
-      }
+      if (displayEl) displayEl.textContent = `対象まで: 約${distance.toFixed(1)}m`;
     }
   }
 });
 
 // ════════════════════════════════════════════════
 // エンティティを「正しい座標が判明してから」動的に生成する
+// (0,0などの誤った座標での初期化を避けるための対策)
 // ════════════════════════════════════════════════
-let appearEl = null;
-let loopEl = null;
-
 function createFindAREntities(lat, lng) {
-  appearEl = document.createElement('a-entity');
+  const sceneEl = document.getElementById('findar-scene');
+
+  const appearEl = document.createElement('a-entity');
   appearEl.setAttribute('id', 'findar-appear');
   appearEl.setAttribute('gltf-model', 'url(./FindAR_appear.glb)');
   appearEl.setAttribute('gltf-animation-once', '');
@@ -377,13 +229,20 @@ function createFindAREntities(lat, lng) {
   appearEl.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lng};`);
   appearEl.setAttribute('visible', 'true');
 
-  loopEl = document.createElement('a-entity');
+  const loopEl = document.createElement('a-entity');
   loopEl.setAttribute('id', 'findar-loop');
   loopEl.setAttribute('gltf-model', 'url(./FindAR_loop.glb)');
   loopEl.setAttribute('gltf-animation-loop-trimmed', 'startFrame: 28; endFrame: 90; fps: 24');
   loopEl.setAttribute('gps-distance-scale', '');
   loopEl.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lng};`);
   loopEl.setAttribute('visible', 'false');
+
+  appearEl.addEventListener('model-loaded', () => {
+    console.log('[FindAR] ⑧ appearモデルの読み込み完了');
+  });
+  loopEl.addEventListener('model-loaded', () => {
+    console.log('[FindAR] ⑨ loopモデルの読み込み完了');
+  });
 
   appearEl.addEventListener('findar-sequence-finished', () => {
     appearEl.setAttribute('visible', false);
@@ -395,8 +254,7 @@ function createFindAREntities(lat, lng) {
 }
 
 // ════════════════════════════════════════════════
-// 起動フロー：タップでカメラ・位置情報・モーションセンサーの許可を取得
-// （iOSはユーザー操作なしにセンサー許可ダイアログを出せないため必須）
+// 起動フロー：各ステップでログを出し、どこまで進んだか特定できるようにする
 // ════════════════════════════════════════════════
 const startOverlay = document.getElementById('start-overlay');
 const startButton = document.getElementById('start-button');
@@ -404,33 +262,45 @@ const statusBar = document.getElementById('status-bar');
 const sceneEl = document.getElementById('findar-scene');
 
 startButton.addEventListener('click', async () => {
+  console.log('[FindAR] ① ボタンがタップされました');
   statusBar.textContent = '位置情報を取得中...';
 
-  // iOS 13+ ではモーションセンサーの利用に明示的な許可が必要
   if (typeof DeviceOrientationEvent !== 'undefined' &&
       typeof DeviceOrientationEvent.requestPermission === 'function') {
     try {
       const permission = await DeviceOrientationEvent.requestPermission();
+      console.log('[FindAR] ② モーションセンサー許可結果:', permission);
       if (permission !== 'granted') {
         statusBar.textContent = 'モーションセンサーの許可が必要です';
         return;
       }
     } catch (err) {
-      console.error('[FindAR] motion permission error:', err);
+      console.error('[FindAR] ② モーションセンサー許可でエラー:', err);
     }
+  } else {
+    console.log('[FindAR] ② モーションセンサー許可は不要な端末です');
   }
 
+  console.log('[FindAR] ③ Firestoreから位置情報を取得します');
   const target = await fetchTargetLocationFromFirebase();
+  console.log('[FindAR] ④ Firestore取得結果:', target);
+
   if (isNaN(target.lat) || isNaN(target.lng)) {
+    console.log('[FindAR] ④-1 座標が不正なため中断');
     statusBar.textContent = '相手の位置情報を取得できませんでした';
     return;
   }
 
+  console.log('[FindAR] ⑤ エンティティを生成します:', target.lat, target.lng);
+  console.log('[FindAR] ⑤-1 gps-new-cameraコンポーネントの存在確認:', !!AFRAME.components['gps-new-camera']);
+  console.log('[FindAR] ⑤-2 gps-new-entity-placeコンポーネントの存在確認:', !!AFRAME.components['gps-new-entity-place']);
 
-createFindAREntities(target.lat, target.lng);
+  createFindAREntities(target.lat, target.lng);
+  console.log('[FindAR] ⑥ エンティティ生成完了');
 
   startOverlay.style.display = 'none';
   statusBar.textContent = '';
+  console.log('[FindAR] ⑦ オーバーレイを閉じました');
 });
 </script>
 </body>
