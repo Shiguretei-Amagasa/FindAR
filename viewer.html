@@ -333,12 +333,21 @@ startButton.addEventListener('click', async () => {
     return;
   }
 
-  console.log('[FindAR] ⑤ エンティティを生成します:', target.lat, target.lng);
-  console.log('[FindAR] ⑤-1 gps-new-cameraコンポーネントの存在確認:', !!AFRAME.components['gps-new-camera']);
-  console.log('[FindAR] ⑤-2 gps-new-entity-placeコンポーネントの存在確認:', !!AFRAME.components['gps-new-entity-place']);
+  console.log('[FindAR] ⑤ カメラの実GPS取得を待ちます:', target.lat, target.lng);
+  statusBar.textContent = 'GPS位置情報を取得中...';
 
-  createFindAREntities(target.lat, target.lng);
-  console.log('[FindAR] ⑥ エンティティ生成完了');
+  const cameraEl = document.querySelector('[gps-new-camera]');
+  let entitiesCreated = false;
+
+  cameraEl.addEventListener('gps-camera-update-position', (e) => {
+    console.log('[FindAR] ⑤-1 カメラの実GPSを取得:', e.detail.position.latitude, e.detail.position.longitude);
+    if (!entitiesCreated) {
+      entitiesCreated = true;
+      createFindAREntities(target.lat, target.lng);
+      console.log('[FindAR] ⑥ エンティティ生成完了(実GPS取得後)');
+      statusBar.textContent = '';
+    }
+  });
 
   startOverlay.style.display = 'none';
   setTimeout(() => {
