@@ -81,21 +81,19 @@ import { initializeAppCheck, ReCaptchaV3Provider }
 // TODO: index.html と同じFirebaseプロジェクトの設定値に置き換えてください
 // ════════════════════════════════════════════════
 const firebaseConfig = {
-  apiKey: "AIzaSyByb6EuWZ9Iy9QiR0Nw6IWRb8O_JQqpMSc",
-  authDomain: "findar-ae099.firebaseapp.com",
-  databaseURL: "https://findar-ae099-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "findar-ae099",
-  storageBucket: "findar-ae099.firebasestorage.app",
-  messagingSenderId: "1043165089164",
-  appId: "1:1043165089164:web:0db15bfbef3d85d8df1aa9",
-  measurementId: "G-J7H2LC9FFS"
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
 };
 
 const app = initializeApp(firebaseConfig);
 
 // TODO: サイトキー(シークレットキーではない方)に置き換えてください
 const appCheck = initializeAppCheck(app, {
-  provider: new ReCaptchaV3Provider('6LeQYFItAAAAAGaVvZx_Txa8M26qytXHou4ZXmqk'),
+  provider: new ReCaptchaV3Provider('YOUR_RECAPTCHA_SITE_KEY'),
   isTokenAutoRefreshEnabled: true
 });
 
@@ -295,10 +293,24 @@ startButton.addEventListener('click', async () => {
   console.log('[FindAR] ⑤-1 gps-new-cameraコンポーネントの存在確認:', !!AFRAME.components['gps-new-camera']);
   console.log('[FindAR] ⑤-2 gps-new-entity-placeコンポーネントの存在確認:', !!AFRAME.components['gps-new-entity-place']);
 
+  navigator.geolocation.getCurrentPosition(
+  (pos) => {
+    console.log('[FindAR診断] ARを開始した時点の自分のGPS:', pos.coords.latitude, pos.coords.longitude, '精度(m):', pos.coords.accuracy);
+  },
+  (err) => {
+    console.log('[FindAR診断] 自分のGPS取得失敗:', err.code, err.message);
+  },
+  { enableHighAccuracy: true, timeout: 15000 }
+);
+
   createFindAREntities(target.lat, target.lng);
   console.log('[FindAR] ⑥ エンティティ生成完了');
 
   startOverlay.style.display = 'none';
+  setTimeout(() => {
+  const cameraEl = document.querySelector('a-camera');
+  console.log('[FindAR診断] 5秒後のカメラ自身のGPS状態:', cameraEl.components['gps-new-camera']);
+}, 5000);
   statusBar.textContent = '';
   console.log('[FindAR] ⑦ オーバーレイを閉じました');
 });
