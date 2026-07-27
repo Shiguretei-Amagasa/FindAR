@@ -337,16 +337,6 @@ startButton.addEventListener('click', async () => {
   console.log('[FindAR] ⑤-1 gps-new-cameraコンポーネントの存在確認:', !!AFRAME.components['gps-new-camera']);
   console.log('[FindAR] ⑤-2 gps-new-entity-placeコンポーネントの存在確認:', !!AFRAME.components['gps-new-entity-place']);
 
-  navigator.geolocation.getCurrentPosition(
-  (pos) => {
-    console.log('[FindAR診断] ARを開始した時点の自分のGPS:', pos.coords.latitude, pos.coords.longitude, '精度(m):', pos.coords.accuracy);
-  },
-  (err) => {
-    console.log('[FindAR診断] 自分のGPS取得失敗:', err.code, err.message);
-  },
-  { enableHighAccuracy: true, timeout: 15000 }
-);
-
   createFindAREntities(target.lat, target.lng);
   console.log('[FindAR] ⑥ エンティティ生成完了');
 
