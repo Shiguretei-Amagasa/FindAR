@@ -46,6 +46,14 @@
     z-index: 500; text-align: center; color: #eae6ffcc; font-size: 14px;
     font-weight: 600; letter-spacing: 0.05em; pointer-events: none; text-shadow: 0 1px 4px #000;
   }
+  #debug-log {
+  position: fixed; top: 40px; left: 8px; right: 8px;
+  max-height: 40vh; overflow-y: auto;
+  z-index: 600; background: rgba(0,0,0,0.6); border-radius: 8px;
+  padding: 8px; font-size: 10px; line-height: 1.5; color: #9fffb0;
+  font-family: monospace; white-space: pre-wrap; word-break: break-all;
+  pointer-events: none;
+}
 </style>
 </head>
 <body>
@@ -71,6 +79,40 @@
 </a-scene>
 
 <script type="module">
+  // ════════════════════════════════════════════════
+// デバッグ用：console.log/errorの内容を画面上にも表示する
+// (リモートデバッグ環境が無い場合の代替)
+// ════════════════════════════════════════════════
+const debugLogEl_init = () => document.getElementById('debug-log');
+const originalConsoleLog = console.log.bind(console);
+const originalConsoleError = console.error.bind(console);
+
+function appendDebugLine(prefix, args) {
+  const el = debugLogEl_init();
+  if (!el) return;
+  const text = args.map(a => {
+    try { return typeof a === 'object' ? JSON.stringify(a) : String(a); }
+    catch (e) { return String(a); }
+  }).join(' ');
+  const line = document.createElement('div');
+  line.textContent = `${prefix} ${text}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+console.log = (...args) => {
+  originalConsoleLog(...args);
+  appendDebugLine('[LOG]', args);
+};
+console.error = (...args) => {
+  originalConsoleError(...args);
+  appendDebugLine('[ERR]', args);
+};
+console.warn = (...args) => {
+  originalConsoleLog(...args);
+  appendDebugLine('[WARN]', args);
+};
+
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getFirestore, doc, getDoc }
   from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
