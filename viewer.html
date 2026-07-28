@@ -339,23 +339,34 @@ startButton.addEventListener('click', async () => {
   const cameraEl = document.querySelector('[gps-new-camera]');
   let entitiesCreated = false;
 
-  cameraEl.addEventListener('gps-camera-update-position', (e) => {
-    console.log('[FindAR] ⑤-1 カメラの実GPSを取得:', e.detail.position.latitude, e.detail.position.longitude);
-    if (!entitiesCreated) {
-      entitiesCreated = true;
-      createFindAREntities(target.lat, target.lng);
-      console.log('[FindAR] ⑥ エンティティ生成完了(実GPS取得後)');
-      statusBar.textContent = '';
-    }
-  });
+  const cameraEl = document.querySelector('[gps-new-camera]');
+let entitiesCreated = false;
 
-  startOverlay.style.display = 'none';
+const gpsTimeout = setTimeout(() => {
+  if (!entitiesCreated) {
+    console.log('[FindAR] ⑤-2 15秒経過してもGPSイベントが発火しませんでした');
+    statusBar.textContent = 'GPSを取得できませんでした。屋外で再度お試しください';
+  }
+}, 15000);
+
+cameraEl.addEventListener('gps-camera-update-position', (e) => {
+  console.log('[FindAR] ⑤-1 カメラの実GPSを取得:', e.detail.position.latitude, e.detail.position.longitude);
+  if (!entitiesCreated) {
+    entitiesCreated = true;
+    clearTimeout(gpsTimeout);
+    createFindAREntities(target.lat, target.lng);
+    console.log('[FindAR] ⑥ エンティティ生成完了(実GPS取得後)');
+    startOverlay.style.display = 'none';
+    statusBar.textContent = '';
+    console.log('[FindAR] ⑦ オーバーレイを閉じました');
+  }
+});
+
   setTimeout(() => {
   const cameraEl = document.querySelector('a-camera');
   console.log('[FindAR診断] 5秒後のカメラ自身のGPS状態:', cameraEl.components['gps-new-camera']);
 }, 5000);
-  statusBar.textContent = '';
-  console.log('[FindAR] ⑦ オーバーレイを閉じました');
+ 
 });
 </script>
 </body>
