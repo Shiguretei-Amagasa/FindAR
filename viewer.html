@@ -361,13 +361,6 @@ cameraEl.addEventListener('gps-camera-update-position', (e) => {
     console.log('[FindAR] ⑦ オーバーレイを閉じました');
   }
 });
-
-  setTimeout(() => {
-  const cameraEl = document.querySelector('a-camera');
-  console.log('[FindAR診断] 5秒後のカメラ自身のGPS状態:', cameraEl.components['gps-new-camera']);
-}, 5000);
- 
-});
 </script>
 </body>
 </html>
