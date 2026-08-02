@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GPS AR 最小テスト</title>
+<title>FindAR - STEP1: Firestore連携テスト</title>
 <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
 <script>eruda.init();</script>
 <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
@@ -12,36 +12,90 @@
 </head>
 <body style="margin:0; overflow:hidden;">
 
+<div id="status" style="position:fixed; top:8px; left:8px; right:8px; z-index:600; color:#fff; background:rgba(0,0,0,0.5); padding:6px 10px; font-family:sans-serif; font-size:13px; border-radius:6px;">
+  読み込み中...
+</div>
+
 <a-scene
   vr-mode-ui="enabled: false"
   embedded
-  arjs="sourceType: webcam; debugUIEnabled: false;"
+  arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
   renderer="antialias: true; alpha: true;"
 >
   <a-camera gps-new-camera="gpsMinDistance: 5;"></a-camera>
 </a-scene>
 
-<script>
-  // AR.js公式パターン：カメラが実際のGPS位置を初めて取得した瞬間に、
-  // その位置から北へ約11m(緯度0.0001度)ずらした場所に赤い箱を1個だけ置く
-  window.addEventListener('DOMContentLoaded', () => {
-    const cameraEl = document.querySelector('[gps-new-camera]');
-    let placed = false;
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import { getFirestore, doc, getDoc }
+  from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
-    cameraEl.addEventListener('gps-camera-update-position', (e) => {
-      console.log('[TEST] GPS取得:', e.detail.position.latitude, e.detail.position.longitude);
-      if (placed) return;
-      placed = true;
+// ════════════════════════════════════════════════
+// TODO: index.htmlと同じFirebaseプロジェクトの値に置き換えてください
+// ════════════════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "AIzaSyByb6EuWZ9Iy9QiR0Nw6IWRb8O_JQqpMSc",
+  authDomain: "findar-ae099.firebaseapp.com",
+  databaseURL: "https://findar-ae099-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "findar-ae099",
+  storageBucket: "findar-ae099.firebasestorage.app",
+  messagingSenderId: "1043165089164",
+  appId: "1:1043165089164:web:0db15bfbef3d85d8df1aa9",
+  measurementId: "G-J7H2LC9FFS"
+};
 
-      const box = document.createElement('a-box');
-      box.setAttribute('color', 'red');
-      box.setAttribute('scale', '10 10 10');
-      box.setAttribute('gps-new-entity-place', `latitude: ${e.detail.position.latitude + 0.0001}; longitude: ${e.detail.position.longitude};`);
-      document.querySelector('a-scene').appendChild(box);
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
-      console.log('[TEST] 赤い箱を配置しました(自分の北側 約11m)');
-    });
+const statusEl = document.getElementById('status');
+
+async function fetchTargetLocationFromFirebase() {
+  const params = new URLSearchParams(location.search);
+  const meetupId = params.get('id');
+  if (!meetupId) {
+    return { lat: NaN, lng: NaN };
+  }
+  try {
+    const snap = await getDoc(doc(db, 'meetups', meetupId));
+    if (!snap.exists()) return { lat: NaN, lng: NaN };
+    const data = snap.data();
+    return { lat: data.lat, lng: data.lng };
+  } catch (err) {
+    console.error('[FindAR] Firestore取得エラー:', err);
+    return { lat: NaN, lng: NaN };
+  }
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  statusEl.textContent = 'Firestoreから座標を取得中...';
+  const target = await fetchTargetLocationFromFirebase();
+  console.log('[STEP1] Firestore取得結果:', target);
+
+  if (isNaN(target.lat) || isNaN(target.lng)) {
+    statusEl.textContent = '座標を取得できませんでした(URLの?id=を確認してください)';
+    return;
+  }
+
+  statusEl.textContent = `対象座標: ${target.lat.toFixed(6)}, ${target.lng.toFixed(6)} / GPS取得待ち...`;
+
+  const cameraEl = document.querySelector('[gps-new-camera]');
+  let placed = false;
+
+  cameraEl.addEventListener('gps-camera-update-position', (e) => {
+    console.log('[STEP1] 自分のGPS取得:', e.detail.position.latitude, e.detail.position.longitude);
+    if (placed) return;
+    placed = true;
+
+    const box = document.createElement('a-box');
+    box.setAttribute('color', 'red');
+    box.setAttribute('scale', '10 10 10');
+    box.setAttribute('gps-new-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
+    document.querySelector('a-scene').appendChild(box);
+
+    statusEl.textContent = `赤い箱を配置しました(対象座標: ${target.lat.toFixed(6)}, ${target.lng.toFixed(6)})`;
+    console.log('[STEP1] 赤い箱を配置しました:', target.lat, target.lng);
   });
+});
 </script>
 </body>
 </html>
