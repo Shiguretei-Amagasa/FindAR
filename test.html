@@ -15,6 +15,7 @@
 <div id="status" style="position:fixed; top:8px; left:8px; right:8px; z-index:600; color:#fff; background:rgba(0,0,0,0.5); padding:6px 10px; font-family:sans-serif; font-size:13px; border-radius:6px;">
   読み込み中...
 </div>
+<div id="distance-display" style="position:fixed; bottom:16px; left:0; right:0; z-index:600; text-align:center; color:#fff; font-size:16px; font-weight:bold; text-shadow:0 1px 4px #000;"></div>
 
 <a-scene
   vr-mode-ui="enabled: false"
@@ -65,6 +66,17 @@ async function fetchTargetLocationFromFirebase() {
     return { lat: NaN, lng: NaN };
   }
 }
+AFRAME.registerComponent('distance-display', {
+  init: function () {
+    this.cameraEl = document.querySelector('a-camera');
+  },
+  tick: function () {
+    if (!this.cameraEl || !this.cameraEl.object3D) return;
+    const distance = this.cameraEl.object3D.position.distanceTo(this.el.object3D.position);
+    const el = document.getElementById('distance-display');
+    if (el) el.textContent = `対象まで: 約${distance.toFixed(1)}m`;
+  }
+});
 
 window.addEventListener('DOMContentLoaded', async () => {
   statusEl.textContent = 'Firestoreから座標を取得中...';
@@ -88,8 +100,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     const box = document.createElement('a-box');
     box.setAttribute('color', 'red');
-    box.setAttribute('scale', '10 10 10');
+    box.setAttribute('scale', '3 3 3');
     box.setAttribute('gps-new-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
+    box.setAttribute('distance-display', '');
     document.querySelector('a-scene').appendChild(box);
 
     statusEl.textContent = `赤い箱を配置しました(対象座標: ${target.lat.toFixed(6)}, ${target.lng.toFixed(6)})`;
