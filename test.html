@@ -12,6 +12,12 @@
 </head>
 <body style="margin:0; overflow:hidden;">
 
+  <div id="tap-overlay" style="position:fixed; inset:0; z-index:999; display:flex; align-items:center; justify-content:center; background:#000; color:#fff; font-family:sans-serif; text-align:center; padding:24px;">
+    <div>
+      <p style="margin-bottom:20px;">カメラ・位置情報・方位センサーの<br>使用を許可してください</p>
+      <button id="tap-button" style="padding:14px 32px; font-size:16px; border-radius:999px; border:1px solid #fff; background:transparent; color:#fff;">タップして開始</button>
+    </div>
+  </div>  
 <div id="status" style="position:fixed; top:8px; left:8px; right:8px; z-index:600; color:#fff; background:rgba(0,0,0,0.5); padding:6px 10px; font-family:sans-serif; font-size:13px; border-radius:6px;">
   読み込み中...
 </div>
@@ -78,8 +84,22 @@ AFRAME.registerComponent('distance-display', {
   }
 });
 
-window.addEventListener('DOMContentLoaded', async () => {
+document.getElementById('tap-button').addEventListener('click', async () => {
+  document.getElementById('tap-overlay').style.display = 'none';
+
+  // iOS：方位センサーの許可を、このタップ操作の中で明示的にリクエストする
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      const permission = await DeviceOrientationEvent.requestPermission();
+      console.log('[STEP1] 方位センサー許可結果:', permission);
+    } catch (err) {
+      console.error('[STEP1] 方位センサー許可エラー:', err);
+    }
+  }
+
   statusEl.textContent = 'Firestoreから座標を取得中...';
+
   const target = await fetchTargetLocationFromFirebase();
   console.log('[STEP1] Firestore取得結果:', target);
 
@@ -100,7 +120,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     const box = document.createElement('a-box');
     box.setAttribute('color', 'red');
-    box.setAttribute('scale', '3 3 3');
+    box.setAttribute('scale', '10 10 10');
     box.setAttribute('gps-new-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
     box.setAttribute('distance-display', '');
     document.querySelector('a-scene').appendChild(box);
