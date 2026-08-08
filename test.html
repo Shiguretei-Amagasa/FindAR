@@ -120,7 +120,7 @@ document.getElementById('tap-button').addEventListener('click', async () => {
 
     const box = document.createElement('a-box');
     box.setAttribute('color', 'red');
-    box.setAttribute('scale', '10 10 10');
+    box.setAttribute('scale', '20 20 20');
     box.setAttribute('gps-new-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
     box.setAttribute('distance-display', '');
     document.querySelector('a-scene').appendChild(box);
