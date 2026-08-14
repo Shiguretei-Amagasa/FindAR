@@ -118,6 +118,13 @@ function tryCreateBox() {
 
   statusEl.textContent = `赤い箱を配置しました(対象座標: ${target.lat.toFixed(6)}, ${target.lng.toFixed(6)})`;
   console.log('[STEP1] 赤い箱を配置しました:', target.lat, target.lng);
+  setTimeout(() => {
+    console.log('[STEP1診断] 箱のvisible:', box.getAttribute('visible'));
+    console.log('[STEP1診断] 箱のobject3D.visible:', box.object3D.visible);
+    console.log('[STEP1診断] 箱のscale:', box.object3D.scale.x, box.object3D.scale.y, box.object3D.scale.z);
+    console.log('[STEP1診断] 箱のposition:', box.object3D.position.x, box.object3D.position.y, box.object3D.position.z);
+    console.log('[STEP1診断] カメラのposition:', cameraEl.object3D.position.x, cameraEl.object3D.position.y, cameraEl.object3D.position.z);
+  }, 2000);
 }
 
 // ════════════════════════════════════════════════
