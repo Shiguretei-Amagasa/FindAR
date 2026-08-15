@@ -23,6 +23,7 @@
   読み込み中...
 </div>
 <div id="distance-display" style="position:fixed; bottom:16px; left:0; right:0; z-index:600; text-align:center; color:#fff; font-size:16px; font-weight:bold; text-shadow:0 1px 4px #000;"></div>
+<div id="compass-display" style="position:fixed; top:40px; left:8px; right:8px; z-index:600; text-align:center; color:#0f0; font-size:20px; font-weight:bold; text-shadow:0 1px 4px #000;"></div>
 
 <a-scene
   vr-mode-ui="enabled: false"
@@ -154,6 +155,17 @@ document.getElementById('tap-button').addEventListener('click', async () => {
 
   statusEl.textContent = `対象座標: ${target.lat.toFixed(6)}, ${target.lng.toFixed(6)} / GPS取得待ち...`;
   tryCreateBox(); // 既にGPSを取得済みなら、ここで即座に配置される
+  window.addEventListener('deviceorientation', (event) => {
+    const heading = event.webkitCompassHeading !== undefined
+      ? event.webkitCompassHeading
+      : (event.alpha !== null ? (360 - event.alpha) : null);
+    const el = document.getElementById('compass-display');
+    if (el) {
+      el.textContent = heading !== null
+        ? `コンパス: ${heading.toFixed(1)}°`
+        : 'コンパスデータなし';
+    }
+  });
 });
 </script>
 </body>
