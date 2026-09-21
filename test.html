@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FindAR - STEP1: Firestore連携テスト</title>
+<title>FindAR - 位置情報にオブジェクトを配置</title>
 <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
 <script>eruda.init();</script>
 <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
@@ -12,9 +12,10 @@
 </head>
 <body style="margin:0; overflow:hidden;">
 
+<!-- タップ操作は「方位センサーの許可」だけに使う。カメラ・GPSの初期化には一切関与しない -->
 <div id="tap-overlay" style="position:fixed; inset:0; z-index:999; display:flex; align-items:center; justify-content:center; background:#000; color:#fff; font-family:sans-serif; text-align:center; padding:24px;">
   <div>
-    <p style="margin-bottom:20px;">カメラ・位置情報・方位センサーの<br>使用を許可してください</p>
+    <p style="margin-bottom:20px;">位置情報の場所にオブジェクトを表示します</p>
     <button id="tap-button" style="padding:14px 32px; font-size:16px; border-radius:999px; border:1px solid #fff; background:transparent; color:#fff;">タップして開始</button>
   </div>
 </div>
@@ -23,15 +24,15 @@
   読み込み中...
 </div>
 <div id="distance-display" style="position:fixed; bottom:16px; left:0; right:0; z-index:600; text-align:center; color:#fff; font-size:16px; font-weight:bold; text-shadow:0 1px 4px #000;"></div>
-<div id="compass-display" style="position:fixed; top:40px; left:8px; right:8px; z-index:600; text-align:center; color:#0f0; font-size:20px; font-weight:bold; text-shadow:0 1px 4px #000;"></div>
 
+<!-- gps-new-cameraは静的に記述する(動的付与するとカメラ描画が停止する不具合を確認済みのため) -->
 <a-scene
   vr-mode-ui="enabled: false"
   embedded
   arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
   renderer="antialias: true; alpha: true;"
 >
- <a-camera id="main-camera"></a-camera>
+  <a-camera id="main-camera" gps-new-camera="gpsMinDistance: 5;"></a-camera>
 </a-scene>
 
 <script type="module">
@@ -55,15 +56,23 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
-
 const statusEl = document.getElementById('status');
+
+// ════════════════════════════════════════════════
+// 処理順序を確認するためのログ(ChatGPTの提案を採用)
+// ════════════════════════════════════════════════
+function log(step, ...args) {
+  console.log(`[${step}]`, ...args);
+}
+
+log('CAMERA', 'request start');
 
 // ════════════════════════════════════════════════
 // 距離表示コンポーネント
 // ════════════════════════════════════════════════
 AFRAME.registerComponent('distance-display', {
   init: function () {
-    this.cameraEl = document.querySelector('a-camera');
+    this.cameraEl = document.getElementById('main-camera');
   },
   tick: function () {
     if (!this.cameraEl || !this.cameraEl.object3D) return;
@@ -89,9 +98,8 @@ async function fetchTargetLocationFromFirebase() {
 }
 
 // ════════════════════════════════════════════════
-// GPS監視は、ページ読み込み直後・タップ操作を待たずに即座に開始する。
-// 取得できた最新の自分の位置は毎回 lastKnownFix に保存し続け、
-// イベントの取りこぼし(gpsMinDistanceによる再発火制限)の影響を受けないようにする。
+// GPS監視は、ページ読み込み直後・タップを待たずに即座に開始する
+// (タップ後に開始すると最初の取得イベントを取りこぼす既知の問題があるため)
 // ════════════════════════════════════════════════
 let lastKnownFix = null;
 let target = null;
@@ -100,16 +108,19 @@ let boxCreated = false;
 const cameraEl = document.getElementById('main-camera');
 cameraEl.addEventListener('gps-camera-update-position', (e) => {
   lastKnownFix = { lat: e.detail.position.latitude, lng: e.detail.position.longitude };
-  console.log('[STEP1] 自分のGPS取得:', lastKnownFix.lat, lastKnownFix.lng);
+  log('GPS', 'position acquired', lastKnownFix.lat, lastKnownFix.lng);
   tryCreateBox();
 });
 
 function tryCreateBox() {
   if (boxCreated) return;
   if (!target || isNaN(target.lat)) return;
-  if (!lastKnownFix) return; // まだ一度もGPSを取得していない
+  if (!lastKnownFix) return;
 
   boxCreated = true;
+
+  // エンティティは一度だけ生成する。生成後にsetAttributeで座標を変更しない
+  // (後からの属性変更は正しく反映されない既知の問題があるため)
   const box = document.createElement('a-box');
   box.setAttribute('color', 'red');
   box.setAttribute('scale', '15 15 15');
@@ -117,38 +128,31 @@ function tryCreateBox() {
   box.setAttribute('distance-display', '');
   document.querySelector('a-scene').appendChild(box);
 
-  statusEl.textContent = `赤い箱を配置しました(対象座標: ${target.lat.toFixed(6)}, ${target.lng.toFixed(6)})`;
-  console.log('[STEP1] 赤い箱を配置しました:', target.lat, target.lng);
-  setTimeout(() => {
-    console.log('[STEP1診断] 箱のvisible:', box.getAttribute('visible'));
-    console.log('[STEP1診断] 箱のobject3D.visible:', box.object3D.visible);
-    console.log('[STEP1診断] 箱のscale:', box.object3D.scale.x, box.object3D.scale.y, box.object3D.scale.z);
-    console.log('[STEP1診断] 箱のposition:', box.object3D.position.x, box.object3D.position.y, box.object3D.position.z);
-    console.log('[STEP1診断] カメラのposition:', cameraEl.object3D.position.x, cameraEl.object3D.position.y, cameraEl.object3D.position.z);
-  }, 2000);
+  statusEl.textContent = `オブジェクトを配置しました(対象座標: ${target.lat.toFixed(6)}, ${target.lng.toFixed(6)})`;
+  log('AR', 'object placed', target.lat, target.lng);
 }
 
 // ════════════════════════════════════════════════
-// タップ操作：センサー許可 → Firestore取得 → target確定
+// タップ操作：方位センサーの許可のみ(カメラ・GPSには一切触れない) → Firestore取得
 // ════════════════════════════════════════════════
 document.getElementById('tap-button').addEventListener('click', async () => {
   document.getElementById('tap-overlay').style.display = 'none';
 
   if (typeof DeviceOrientationEvent !== 'undefined' &&
       typeof DeviceOrientationEvent.requestPermission === 'function') {
+    log('ORIENTATION', 'permission request');
     try {
       const permission = await DeviceOrientationEvent.requestPermission();
-            // 許可が取れてから、初めてgps-new-cameraを取り付ける
-            document.getElementById('main-camera').setAttribute('gps-new-camera', 'gpsMinDistance: 5;');
-      console.log('[STEP1] 方位センサー許可結果:', permission);
+      log('ORIENTATION', 'permission result', permission);
     } catch (err) {
-      console.error('[STEP1] 方位センサー許可エラー:', err);
+      console.error('[ORIENTATION] permission error:', err);
     }
   }
+  log('ORIENTATION', 'listener started (AR.js internal)');
 
   statusEl.textContent = 'Firestoreから座標を取得中...';
   target = await fetchTargetLocationFromFirebase();
-  console.log('[STEP1] Firestore取得結果:', target);
+  log('FIRESTORE', 'target fetched', target);
 
   if (isNaN(target.lat) || isNaN(target.lng)) {
     statusEl.textContent = '座標を取得できませんでした(URLの?id=を確認してください)';
@@ -156,18 +160,7 @@ document.getElementById('tap-button').addEventListener('click', async () => {
   }
 
   statusEl.textContent = `対象座標: ${target.lat.toFixed(6)}, ${target.lng.toFixed(6)} / GPS取得待ち...`;
-  tryCreateBox(); // 既にGPSを取得済みなら、ここで即座に配置される
-  window.addEventListener('deviceorientation', (event) => {
-    const heading = event.webkitCompassHeading !== undefined
-      ? event.webkitCompassHeading
-      : (event.alpha !== null ? (360 - event.alpha) : null);
-    const el = document.getElementById('compass-display');
-    if (el) {
-      el.textContent = heading !== null
-        ? `コンパス: ${heading.toFixed(1)}°`
-        : 'コンパスデータなし';
-    }
-  });
+  tryCreateBox();
 });
 </script>
 </body>
