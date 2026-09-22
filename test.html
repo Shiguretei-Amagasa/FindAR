@@ -130,6 +130,17 @@ function tryCreateBox() {
 
   statusEl.textContent = `オブジェクトを配置しました(対象座標: ${target.lat.toFixed(6)}, ${target.lng.toFixed(6)})`;
   log('AR', 'object placed', target.lat, target.lng);
+  setTimeout(() => {
+    const dist = cameraEl.object3D.position.distanceTo(box.object3D.position);
+    log('DIAG', '箱のThree.js座標(X,Y,Z):', box.object3D.position.x, box.object3D.position.y, box.object3D.position.z);
+    log('DIAG', 'カメラのThree.js座標(X,Y,Z):', cameraEl.object3D.position.x, cameraEl.object3D.position.y, cameraEl.object3D.position.z);
+    log('DIAG', '実際の距離(m):', dist.toFixed(2));
+    log('DIAG', 'カメラのrotation(X,Y,Z度):', 
+      THREE.MathUtils.radToDeg(cameraEl.object3D.rotation.x).toFixed(1),
+      THREE.MathUtils.radToDeg(cameraEl.object3D.rotation.y).toFixed(1),
+      THREE.MathUtils.radToDeg(cameraEl.object3D.rotation.z).toFixed(1)
+    );
+  }, 2000);
 }
 
 // ════════════════════════════════════════════════
@@ -149,6 +160,9 @@ document.getElementById('tap-button').addEventListener('click', async () => {
     }
   }
   log('ORIENTATION', 'listener started (AR.js internal)');
+  window.addEventListener('deviceorientation', (event) => {
+    log('DIAG-ORIENT', 'alpha:', event.alpha?.toFixed(1), 'beta:', event.beta?.toFixed(1), 'gamma:', event.gamma?.toFixed(1), 'webkitCompassHeading:', event.webkitCompassHeading?.toFixed(1));
+  }, { once: true }); // 1回だけ記録(ログが大量にならないように)
 
   statusEl.textContent = 'Firestoreから座標を取得中...';
   target = await fetchTargetLocationFromFirebase();
