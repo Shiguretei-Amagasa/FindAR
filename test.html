@@ -24,6 +24,7 @@
   読み込み中...
 </div>
 <div id="distance-display" style="position:fixed; bottom:16px; left:0; right:0; z-index:600; text-align:center; color:#fff; font-size:16px; font-weight:bold; text-shadow:0 1px 4px #000;"></div>
+<div id="heading-compare" style="position:fixed; top:40px; left:8px; right:8px; z-index:600; text-align:center; color:#0f0; font-size:16px; font-weight:bold; text-shadow:0 1px 4px #000; line-height:1.6;"></div>
 
 <!-- gps-new-cameraは静的に記述する(動的付与するとカメラ描画が停止する不具合を確認済みのため) -->
 <a-scene
@@ -160,9 +161,23 @@ document.getElementById('tap-button').addEventListener('click', async () => {
     }
   }
   log('ORIENTATION', 'listener started (AR.js internal)');
+  let latestCompassHeading = null;
+
   window.addEventListener('deviceorientation', (event) => {
-    log('DIAG-ORIENT', 'alpha:', event.alpha?.toFixed(1), 'beta:', event.beta?.toFixed(1), 'gamma:', event.gamma?.toFixed(1), 'webkitCompassHeading:', event.webkitCompassHeading?.toFixed(1));
-  }, { once: true }); // 1回だけ記録(ログが大量にならないように)
+    latestCompassHeading = event.webkitCompassHeading !== undefined
+      ? event.webkitCompassHeading
+      : (event.alpha !== null ? (360 - event.alpha) : null);
+  });
+
+  setInterval(() => {
+    const el = document.getElementById('heading-compare');
+    if (!el) return;
+    const arjsRotationY = THREE.MathUtils.radToDeg(cameraEl.object3D.rotation.y);
+    const arjsNormalized = ((arjsRotationY % 360) + 360) % 360; // 0〜360度に正規化
+    el.innerHTML =
+      `①センサー実測: ${latestCompassHeading !== null ? latestCompassHeading.toFixed(1) + '°' : '取得待ち'}<br>` +
+      `②AR.js内部: ${arjsNormalized.toFixed(1)}°`;
+  }, 200);
 
   statusEl.textContent = 'Firestoreから座標を取得中...';
   target = await fetchTargetLocationFromFirebase();
