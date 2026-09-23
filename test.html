@@ -169,21 +169,22 @@ document.getElementById('tap-button').addEventListener('click', async () => {
       : (event.alpha !== null ? (360 - event.alpha) : null);
   });
 
-  setInterval(() => {
-    if (latestCompassHeading === null) return;
+  function applyHeadingOverride() {
+    if (latestCompassHeading !== null) {
+      const headingRad = THREE.MathUtils.degToRad(latestCompassHeading);
+      cameraEl.object3D.rotation.y = -headingRad;
 
-    // AR.js内部のカメラ回転計算を迂回し、実測コンパス値で直接カメラの向きを上書きする
-    const headingRad = THREE.MathUtils.degToRad(latestCompassHeading);
-    cameraEl.object3D.rotation.y = -headingRad;
-
-    const el = document.getElementById('heading-compare');
-    if (el) {
-      const arjsNormalized = ((THREE.MathUtils.radToDeg(cameraEl.object3D.rotation.y) % 360) + 360) % 360;
-      el.innerHTML =
-        `①センサー実測: ${latestCompassHeading.toFixed(1)}°<br>` +
-        `②カメラに適用した値: ${arjsNormalized.toFixed(1)}°`;
+      const el = document.getElementById('heading-compare');
+      if (el) {
+        const arjsNormalized = ((THREE.MathUtils.radToDeg(cameraEl.object3D.rotation.y) % 360) + 360) % 360;
+        el.innerHTML =
+          `①センサー実測: ${latestCompassHeading.toFixed(1)}°<br>` +
+          `②カメラに適用した値: ${arjsNormalized.toFixed(1)}°`;
+      }
     }
-  }, 100);
+    requestAnimationFrame(applyHeadingOverride);
+  }
+  requestAnimationFrame(applyHeadingOverride);
 
   statusEl.textContent = 'Firestoreから座標を取得中...';
   target = await fetchTargetLocationFromFirebase();
