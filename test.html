@@ -170,16 +170,17 @@ document.getElementById('tap-button').addEventListener('click', async () => {
   });
 
   function applyHeadingOverride() {
-    if (latestCompassHeading !== null) {
-      const headingRad = THREE.MathUtils.degToRad(latestCompassHeading);
-      cameraEl.object3D.rotation.y = -headingRad;
+    const boxEl = document.querySelector('a-box');
+    if (boxEl && boxEl.object3D) {
+      const dx = boxEl.object3D.position.x - cameraEl.object3D.position.x;
+      const dz = boxEl.object3D.position.z - cameraEl.object3D.position.z;
+      // 箱を真正面に見るために必要な角度を、位置関係だけから直接計算する(コンパス不使用)
+      const requiredAngle = Math.atan2(-dx, -dz);
+      cameraEl.object3D.rotation.y = requiredAngle;
 
       const el = document.getElementById('heading-compare');
       if (el) {
-        const arjsNormalized = ((THREE.MathUtils.radToDeg(cameraEl.object3D.rotation.y) % 360) + 360) % 360;
-        el.innerHTML =
-          `①センサー実測: ${latestCompassHeading.toFixed(1)}°<br>` +
-          `②カメラに適用した値: ${arjsNormalized.toFixed(1)}°`;
+        el.innerHTML = `箱を直接照準中(コンパス不使用)<br>角度: ${THREE.MathUtils.radToDeg(requiredAngle).toFixed(1)}°`;
       }
     }
     requestAnimationFrame(applyHeadingOverride);
