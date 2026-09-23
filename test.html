@@ -170,14 +170,20 @@ document.getElementById('tap-button').addEventListener('click', async () => {
   });
 
   setInterval(() => {
+    if (latestCompassHeading === null) return;
+
+    // AR.js内部のカメラ回転計算を迂回し、実測コンパス値で直接カメラの向きを上書きする
+    const headingRad = THREE.MathUtils.degToRad(latestCompassHeading);
+    cameraEl.object3D.rotation.y = -headingRad;
+
     const el = document.getElementById('heading-compare');
-    if (!el) return;
-    const arjsRotationY = THREE.MathUtils.radToDeg(cameraEl.object3D.rotation.y);
-    const arjsNormalized = ((arjsRotationY % 360) + 360) % 360; // 0〜360度に正規化
-    el.innerHTML =
-      `①センサー実測: ${latestCompassHeading !== null ? latestCompassHeading.toFixed(1) + '°' : '取得待ち'}<br>` +
-      `②AR.js内部: ${arjsNormalized.toFixed(1)}°`;
-  }, 200);
+    if (el) {
+      const arjsNormalized = ((THREE.MathUtils.radToDeg(cameraEl.object3D.rotation.y) % 360) + 360) % 360;
+      el.innerHTML =
+        `①センサー実測: ${latestCompassHeading.toFixed(1)}°<br>` +
+        `②カメラに適用した値: ${arjsNormalized.toFixed(1)}°`;
+    }
+  }, 100);
 
   statusEl.textContent = 'Firestoreから座標を取得中...';
   target = await fetchTargetLocationFromFirebase();
