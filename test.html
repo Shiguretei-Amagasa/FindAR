@@ -172,15 +172,14 @@ document.getElementById('tap-button').addEventListener('click', async () => {
   function applyHeadingOverride() {
     const boxEl = document.querySelector('a-box');
     if (boxEl && boxEl.object3D) {
-      const dx = boxEl.object3D.position.x - cameraEl.object3D.position.x;
-      const dz = boxEl.object3D.position.z - cameraEl.object3D.position.z;
-      // 箱を真正面に見るために必要な角度を、位置関係だけから直接計算する(コンパス不使用)
-      const requiredAngle = Math.atan2(-dx, -dz);
-      cameraEl.object3D.rotation.y = requiredAngle;
+      // 上下・左右、両方を含めて箱を直接見るようにカメラを向ける
+      cameraEl.object3D.lookAt(boxEl.object3D.position);
 
       const el = document.getElementById('heading-compare');
       if (el) {
-        el.innerHTML = `箱を直接照準中(コンパス不使用)<br>角度: ${THREE.MathUtils.radToDeg(requiredAngle).toFixed(1)}°`;
+        const rx = THREE.MathUtils.radToDeg(cameraEl.object3D.rotation.x).toFixed(1);
+        const ry = THREE.MathUtils.radToDeg(cameraEl.object3D.rotation.y).toFixed(1);
+        el.innerHTML = `箱を直接照準中(lookAt使用)<br>X: ${rx}° Y: ${ry}°`;
       }
     }
     requestAnimationFrame(applyHeadingOverride);
