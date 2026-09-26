@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FindAR - 位置情報にオブジェクトを配置</title>
+<title>FindAR - フローティングオリジン検証</title>
 <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
 <script>eruda.init();</script>
 <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
@@ -12,7 +12,6 @@
 </head>
 <body style="margin:0; overflow:hidden;">
 
-<!-- タップ操作は「方位センサーの許可」だけに使う。カメラ・GPSの初期化には一切関与しない -->
 <div id="tap-overlay" style="position:fixed; inset:0; z-index:999; display:flex; align-items:center; justify-content:center; background:#000; color:#fff; font-family:sans-serif; text-align:center; padding:24px;">
   <div>
     <p style="margin-bottom:20px;">位置情報の場所にオブジェクトを表示します</p>
@@ -24,16 +23,20 @@
   読み込み中...
 </div>
 <div id="distance-display" style="position:fixed; bottom:16px; left:0; right:0; z-index:600; text-align:center; color:#fff; font-size:16px; font-weight:bold; text-shadow:0 1px 4px #000;"></div>
-<div id="heading-compare" style="position:fixed; top:40px; left:8px; right:8px; z-index:600; text-align:center; color:#0f0; font-size:16px; font-weight:bold; text-shadow:0 1px 4px #000; line-height:1.6;"></div>
 
-<!-- gps-new-cameraは静的に記述する(動的付与するとカメラ描画が停止する不具合を確認済みのため) -->
 <a-scene
   vr-mode-ui="enabled: false"
   embedded
   arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
   renderer="antialias: true; alpha: true;"
 >
-  <a-camera id="main-camera" gps-new-camera="gpsMinDistance: 5;"></a-camera>
+  <!-- 実座標の計算だけに使う、非表示の基準エンティティ -->
+  <a-camera id="main-camera" gps-new-camera="gpsMinDistance: 5;">
+    <!-- 箱をカメラの子要素として配置する(フローティングオリジン対策)。
+         カメラからの相対距離(小さい数値)だけを毎フレーム反映するため、
+         GPU側のfloat32精度崩壊(AR.js公式Issue #499で報告されている既知の問題)を回避できる -->
+    <a-box id="visible-box" color="red" scale="2 2 2" visible="false" material="side: double"></a-box>
+  </a-camera>
 </a-scene>
 
 <script type="module">
@@ -59,29 +62,9 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const statusEl = document.getElementById('status');
 
-// ════════════════════════════════════════════════
-// 処理順序を確認するためのログ(ChatGPTの提案を採用)
-// ════════════════════════════════════════════════
 function log(step, ...args) {
   console.log(`[${step}]`, ...args);
 }
-
-log('CAMERA', 'request start');
-
-// ════════════════════════════════════════════════
-// 距離表示コンポーネント
-// ════════════════════════════════════════════════
-AFRAME.registerComponent('distance-display', {
-  init: function () {
-    this.cameraEl = document.getElementById('main-camera');
-  },
-  tick: function () {
-    if (!this.cameraEl || !this.cameraEl.object3D) return;
-    const distance = this.cameraEl.object3D.position.distanceTo(this.el.object3D.position);
-    const el = document.getElementById('distance-display');
-    if (el) el.textContent = `対象まで: 約${distance.toFixed(1)}m`;
-  }
-});
 
 async function fetchTargetLocationFromFirebase() {
   const params = new URLSearchParams(location.search);
@@ -98,61 +81,71 @@ async function fetchTargetLocationFromFirebase() {
   }
 }
 
-// ════════════════════════════════════════════════
-// GPS監視は、ページ読み込み直後・タップを待たずに即座に開始する
-// (タップ後に開始すると最初の取得イベントを取りこぼす既知の問題があるため)
-// ════════════════════════════════════════════════
 let lastKnownFix = null;
 let target = null;
-let boxCreated = false;
+let referenceCreated = false;
+let referenceEl = null;
 
 const cameraEl = document.getElementById('main-camera');
+const visibleBox = document.getElementById('visible-box');
+
 cameraEl.addEventListener('gps-camera-update-position', (e) => {
   lastKnownFix = { lat: e.detail.position.latitude, lng: e.detail.position.longitude };
   log('GPS', 'position acquired', lastKnownFix.lat, lastKnownFix.lng);
-  tryCreateBox();
+  tryCreateReference();
 });
 
-function tryCreateBox() {
-  if (boxCreated) return;
+function tryCreateReference() {
+  if (referenceCreated) return;
   if (!target || isNaN(target.lat)) return;
   if (!lastKnownFix) return;
 
-  boxCreated = true;
+  referenceCreated = true;
 
-  // エンティティは一度だけ生成する。生成後にsetAttributeで座標を変更しない
-  // (後からの属性変更は正しく反映されない既知の問題があるため)
-  const box = document.createElement('a-box');
-  box.setAttribute('color', 'red');
-  box.setAttribute('scale', '15 15 15');
-  box.setAttribute('gps-new-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
-  box.setAttribute('distance-display', '');
-  document.querySelector('a-scene').appendChild(box);
+  // 実座標の計算だけに使う、非表示の基準エンティティ(a-scene直下、巨大な座標のまま)
+  referenceEl = document.createElement('a-entity');
+  referenceEl.setAttribute('gps-new-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
+  referenceEl.setAttribute('visible', 'false');
+  document.querySelector('a-scene').appendChild(referenceEl);
 
-  statusEl.textContent = `オブジェクトを配置しました(対象座標: ${target.lat.toFixed(6)}, ${target.lng.toFixed(6)})`;
-  log('AR', 'object placed', target.lat, target.lng);
-  setTimeout(() => {
-    const dist = cameraEl.object3D.position.distanceTo(box.object3D.position);
-    log('DIAG', '箱のThree.js座標(X,Y,Z):', box.object3D.position.x, box.object3D.position.y, box.object3D.position.z);
-    log('DIAG', 'カメラのThree.js座標(X,Y,Z):', cameraEl.object3D.position.x, cameraEl.object3D.position.y, cameraEl.object3D.position.z);
-    log('DIAG', '実際の距離(m):', dist.toFixed(2));
-    log('DIAG', 'カメラのrotation(X,Y,Z度):', 
-      THREE.MathUtils.radToDeg(cameraEl.object3D.rotation.x).toFixed(1),
-      THREE.MathUtils.radToDeg(cameraEl.object3D.rotation.y).toFixed(1),
-      THREE.MathUtils.radToDeg(cameraEl.object3D.rotation.z).toFixed(1)
-    );
-  }, 2000);
+  statusEl.textContent = `対象座標: ${target.lat.toFixed(6)}, ${target.lng.toFixed(6)}`;
+  log('AR', 'reference placed', target.lat, target.lng);
 }
 
 // ════════════════════════════════════════════════
-// タップ操作：方位センサーの許可のみ(カメラ・GPSには一切触れない) → Firestore取得
+// 毎フレーム、基準エンティティとカメラの「差分(小さい数値)」だけを計算し、
+// カメラの子要素である visible-box にその相対座標を直接設定する
 // ════════════════════════════════════════════════
+AFRAME.registerComponent('floating-origin-sync', {
+  tick: function () {
+    if (!referenceEl || !referenceEl.object3D) return;
+
+    const delta = new THREE.Vector3().subVectors(
+      referenceEl.object3D.position,
+      cameraEl.object3D.position
+    );
+
+    // カメラは回転しているため、その回転を打ち消して「ワールド基準の相対位置」を
+    // カメラのローカル座標に変換する
+    const inverseQuat = cameraEl.object3D.quaternion.clone().invert();
+    delta.applyQuaternion(inverseQuat);
+
+    visibleBox.object3D.position.copy(delta);
+    if (!visibleBox.getAttribute('visible')) {
+      visibleBox.setAttribute('visible', true);
+    }
+
+    const el = document.getElementById('distance-display');
+    if (el) el.textContent = `対象まで: 約${delta.length().toFixed(1)}m`;
+  }
+});
+cameraEl.setAttribute('floating-origin-sync', '');
+
 document.getElementById('tap-button').addEventListener('click', async () => {
   document.getElementById('tap-overlay').style.display = 'none';
 
   if (typeof DeviceOrientationEvent !== 'undefined' &&
       typeof DeviceOrientationEvent.requestPermission === 'function') {
-    log('ORIENTATION', 'permission request');
     try {
       const permission = await DeviceOrientationEvent.requestPermission();
       log('ORIENTATION', 'permission result', permission);
@@ -160,31 +153,6 @@ document.getElementById('tap-button').addEventListener('click', async () => {
       console.error('[ORIENTATION] permission error:', err);
     }
   }
-  log('ORIENTATION', 'listener started (AR.js internal)');
-  let latestCompassHeading = null;
-
-  window.addEventListener('deviceorientation', (event) => {
-    latestCompassHeading = event.webkitCompassHeading !== undefined
-      ? event.webkitCompassHeading
-      : (event.alpha !== null ? (360 - event.alpha) : null);
-  });
-
-  function applyHeadingOverride() {
-    const boxEl = document.querySelector('a-box');
-    if (boxEl && boxEl.object3D) {
-      // 上下・左右、両方を含めて箱を直接見るようにカメラを向ける
-      cameraEl.object3D.lookAt(boxEl.object3D.position);
-
-      const el = document.getElementById('heading-compare');
-      if (el) {
-        const rx = THREE.MathUtils.radToDeg(cameraEl.object3D.rotation.x).toFixed(1);
-        const ry = THREE.MathUtils.radToDeg(cameraEl.object3D.rotation.y).toFixed(1);
-        el.innerHTML = `箱を直接照準中(lookAt使用)<br>X: ${rx}° Y: ${ry}°`;
-      }
-    }
-    requestAnimationFrame(applyHeadingOverride);
-  }
-  requestAnimationFrame(applyHeadingOverride);
 
   statusEl.textContent = 'Firestoreから座標を取得中...';
   target = await fetchTargetLocationFromFirebase();
@@ -195,8 +163,7 @@ document.getElementById('tap-button').addEventListener('click', async () => {
     return;
   }
 
-  statusEl.textContent = `対象座標: ${target.lat.toFixed(6)}, ${target.lng.toFixed(6)} / GPS取得待ち...`;
-  tryCreateBox();
+  tryCreateReference();
 });
 </script>
 </body>
