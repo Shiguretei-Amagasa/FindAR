@@ -31,11 +31,12 @@
   renderer="antialias: true; alpha: true;"
 >
   <!-- 実座標の計算だけに使う、非表示の基準エンティティ -->
-  <a-camera id="main-camera" gps-new-camera="gpsMinDistance: 5;">
-    <!-- 箱をカメラの子要素として配置する(フローティングオリジン対策)。
-         カメラからの相対距離(小さい数値)だけを毎フレーム反映するため、
-         GPU側のfloat32精度崩壊(AR.js公式Issue #499で報告されている既知の問題)を回避できる -->
-  </a-camera>
+  <a-camera
+  id="main-camera"
+  look-controls-enabled="false"
+  arjs-device-orientation-controls="smoothingFactor: 0.1"
+  gps-new-camera="gpsMinDistance: 5;"
+></a-camera>
     <a-box id="visible-box" color="red" scale="2 2 2" visible="false" material="side: double"></a-box>
  </a-scene>
 
