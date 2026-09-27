@@ -35,9 +35,9 @@
     <!-- 箱をカメラの子要素として配置する(フローティングオリジン対策)。
          カメラからの相対距離(小さい数値)だけを毎フレーム反映するため、
          GPU側のfloat32精度崩壊(AR.js公式Issue #499で報告されている既知の問題)を回避できる -->
-    <a-box id="visible-box" color="red" scale="2 2 2" visible="false" material="side: double"></a-box>
   </a-camera>
-</a-scene>
+    <a-box id="visible-box" color="red" scale="2 2 2" visible="false" material="side: double"></a-box>
+ </a-scene>
 
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
@@ -116,30 +116,41 @@ function tryCreateReference() {
 // 毎フレーム、基準エンティティとカメラの「差分(小さい数値)」だけを計算し、
 // カメラの子要素である visible-box にその相対座標を直接設定する
 // ════════════════════════════════════════════════
-AFRAME.registerComponent('floating-origin-sync', {
-  tick: function () {
-    if (!referenceEl || !referenceEl.object3D) return;
+const sceneEl = document.querySelector('a-scene');
 
-    const delta = new THREE.Vector3().subVectors(
-      referenceEl.object3D.position,
-      cameraEl.object3D.position
-    );
+function setupFloatingOrigin() {
+  const threeCamera = sceneEl.camera; // A-Frameが実際に描画に使う、本物のカメラオブジェクト
+  threeCamera.add(visibleBox.object3D); // 箱を、本物のカメラに直接ぶら下げる
 
-    // カメラは回転しているため、その回転を打ち消して「ワールド基準の相対位置」を
-    // カメラのローカル座標に変換する
-    const inverseQuat = cameraEl.object3D.quaternion.clone().invert();
-    delta.applyQuaternion(inverseQuat);
+  const camWorldPos = new THREE.Vector3();
+  const camWorldQuat = new THREE.Quaternion();
 
-    visibleBox.object3D.position.copy(delta);
-    if (!visibleBox.getAttribute('visible')) {
-      visibleBox.setAttribute('visible', true);
+  function tick() {
+    if (referenceEl && referenceEl.object3D) {
+      threeCamera.getWorldPosition(camWorldPos);
+      threeCamera.getWorldQuaternion(camWorldQuat);
+
+      const delta = new THREE.Vector3().subVectors(referenceEl.object3D.position, camWorldPos);
+      delta.applyQuaternion(camWorldQuat.clone().invert());
+
+      visibleBox.object3D.position.copy(delta);
+      if (!visibleBox.getAttribute('visible')) {
+        visibleBox.setAttribute('visible', true);
+      }
+
+      const el = document.getElementById('distance-display');
+      if (el) el.textContent = `対象まで: 約${delta.length().toFixed(1)}m`;
     }
-
-    const el = document.getElementById('distance-display');
-    if (el) el.textContent = `対象まで: 約${delta.length().toFixed(1)}m`;
+    requestAnimationFrame(tick);
   }
-});
-cameraEl.setAttribute('floating-origin-sync', '');
+  tick();
+}
+
+if (sceneEl.hasLoaded) {
+  setupFloatingOrigin();
+} else {
+  sceneEl.addEventListener('loaded', setupFloatingOrigin);
+}
 
 document.getElementById('tap-button').addEventListener('click', async () => {
   document.getElementById('tap-overlay').style.display = 'none';
