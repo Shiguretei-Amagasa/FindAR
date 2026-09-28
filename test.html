@@ -93,13 +93,18 @@ function tryPlace() {
   const lng = target ? target.lng : lastFix.lng;
   placed = true;
 
-  box = document.createElement('a-box');
-  box.setAttribute('color', 'red');
-  box.setAttribute('scale', '10 10 10');
-  box.setAttribute('material', 'side: double'); // 箱の内側に入っても見えるようにする
+  box = document.createElement('a-entity');
+  box.setAttribute('gltf-model', 'url(./FindAR_appear.glb)');
   box.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lng};`);
   document.querySelector('a-scene').appendChild(box);
-  console.log('[AR] box placed', lat, lng);
+  console.log('[AR] model placed', lat, lng);
+
+  box.addEventListener('model-loaded', () => {
+    console.log('[AR] model-loaded event fired');
+  });
+  box.addEventListener('model-error', (e) => {
+    console.error('[AR] model load error', e.detail);
+  });
   statusEl.textContent += ' / 赤い箱を配置しました';
 }
 
