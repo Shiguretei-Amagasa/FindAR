@@ -25,6 +25,8 @@
   renderer="antialias: true; alpha: true;"
 >
   <a-camera gps-new-camera="gpsMinDistance: 5;"></a-camera>
+  <a-light type="ambient" color="#ffffff" intensity="1"></a-light>
+  <a-light type="directional" color="#ffffff" intensity="1" position="1 1 1"></a-light>
 </a-scene>
 
 <script type="module">
@@ -106,7 +108,7 @@ function tryPlace() {
   box.addEventListener('model-error', (e) => {
     console.error('[AR] model load error', e.detail);
   });
-  statusEl.textContent += ' / 赤い箱を配置しました';
+  statusEl.textContent += ' / モデルを配置しました';
 }
 
 // 距離表示(読み取り専用。描画には一切干渉しない)
