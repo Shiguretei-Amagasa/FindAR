@@ -95,6 +95,7 @@ function tryPlace() {
 
   box = document.createElement('a-entity');
   box.setAttribute('gltf-model', 'url(./FindAR_appear.glb)');
+  box.setAttribute('scale', '20 20 20');
   box.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lng};`);
   document.querySelector('a-scene').appendChild(box);
   console.log('[AR] model placed', lat, lng);
