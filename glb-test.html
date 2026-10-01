@@ -31,6 +31,8 @@
 <script>
   document.getElementById('model').addEventListener('model-loaded', (e) => {
     console.log('[TEST] model-loaded 成功');
+    e.detail.model.scale.set(1, 1, 1);
+    console.log('[TEST] スケールを強制的に1,1,1へ上書きしました');
     const mesh = e.detail.model;
     const box = new THREE.Box3().setFromObject(mesh);
     const size = new THREE.Vector3();
