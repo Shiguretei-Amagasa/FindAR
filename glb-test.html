@@ -89,7 +89,16 @@
         mixer.clipAction(clip).play();
       });
       console.log('[TEST] 全', clips.length, '個のクリップを同時再生開始');
-      
+            // アニメーションを持たないメッシュ(=大元のオブジェクトの可能性)を特定する
+            const animatedNames = new Set(clips.map(c => c.name));
+      e.detail.model.traverse((node) => {
+        if (node.isMesh) {
+          const hasOwnClip = [...animatedNames].some(name => name.includes(node.name) || node.name.includes(name));
+          if (!hasOwnClip) {
+            console.log('[TEST診断] アニメーション無しのメッシュ:', node.name, '表示状態:', node.visible);
+          }
+        }
+      });
       const clock = new THREE.Clock();
       function animate() {
         requestAnimationFrame(animate);
