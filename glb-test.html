@@ -85,10 +85,11 @@
 
     if (clips && clips.length > 0) {
       const mixer = new THREE.AnimationMixer(e.detail.model);
-      const action = mixer.clipAction(clips[0]);
-      action.play();
-      console.log('[TEST] アニメーション再生開始:', clips[0].name, '長さ(秒):', clips[0].duration);
-
+      clips.forEach((clip) => {
+        mixer.clipAction(clip).play();
+      });
+      console.log('[TEST] 全', clips.length, '個のクリップを同時再生開始');
+      
       const clock = new THREE.Clock();
       function animate() {
         requestAnimationFrame(animate);
