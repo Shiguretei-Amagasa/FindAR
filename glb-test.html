@@ -79,9 +79,8 @@
     box.getCenter(center);
     console.log('[TEST] モデルの実寸サイズ(X,Y,Z):', size.x.toFixed(3), size.y.toFixed(3), size.z.toFixed(3));
     console.log('[TEST] モデルの中心位置(原点からのズレ X,Y,Z):', center.x.toFixed(3), center.y.toFixed(3), center.z.toFixed(3));
-  });
-      // アニメーション再生
-      const clips = e.detail.model.animations;
+          // アニメーション再生
+          const clips = e.detail.model.animations;
     console.log('[TEST] アニメーション数:', clips ? clips.length : 0);
 
     if (clips && clips.length > 0) {
@@ -99,6 +98,8 @@
     } else {
       console.log('[TEST] このモデルにはアニメーションが含まれていません');
     }
+  });
+
   document.getElementById('model').addEventListener('model-error', (e) => {
     console.error('[TEST] model-error:', e.detail);
   });
