@@ -86,7 +86,10 @@
     if (clips && clips.length > 0) {
       const mixer = new THREE.AnimationMixer(e.detail.model);
       clips.forEach((clip) => {
-        mixer.clipAction(clip).play();
+        const clipAction = mixer.clipAction(clip);
+        clipAction.setLoop(THREE.LoopOnce);
+        clipAction.clampWhenFinished = true; // 終了後、最後のフレームの状態で止まる
+        clipAction.play();
       });
             // アニメーションを持たないメッシュ(=未組み立ての完成形)を、最初は非表示にしておく
             const animatedNames = new Set(clips.map(c => c.name));
