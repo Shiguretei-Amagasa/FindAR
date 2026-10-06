@@ -91,20 +91,31 @@
         clipAction.clampWhenFinished = true; // 終了後、最後のフレームの状態で止まる
         clipAction.play();
       });
-            // アニメーションを持たないメッシュ(=未組み立ての完成形)を、最初は非表示にしておく
-            const animatedNames = new Set(clips.map(c => c.name));
+            // 各クリップが実際にどのノード(メッシュ)を操作対象にしているか、
+      // three.js内部の正規の方法(トラック名の解析)で正確に調べる
+      const animatedNodeNames = new Set();
+      clips.forEach((clip) => {
+        clip.tracks.forEach((track) => {
+          const parsed = THREE.PropertyBinding.parseTrackName(track.name);
+          animatedNodeNames.add(parsed.nodeName);
+        });
+      });
+
       const noClipMeshes = [];
       e.detail.model.traverse((node) => {
         if (node.isMesh) {
-          const hasOwnClip = [...animatedNames].some(name => name.includes(node.name) || node.name.includes(name));
-          if (!hasOwnClip) {
+          if (!animatedNodeNames.has(node.name)) {
             node.visible = false;
             noClipMeshes.push(node);
           }
         }
       });
       console.log('[TEST] 非表示にしたメッシュ数:', noClipMeshes.length);
+      console.log('[TEST] アニメーション対象ノード数:', animatedNodeNames.size);
 
+      const maxDuration = Math.max(...clips.map(c => c.duration));
+      console.log('[TEST] 最長クリップの長さ(秒):', maxDuration);
+      
       // 最も長いクリップの再生時間を基準に、組み立て完了タイミングを計算する
       const maxDuration = Math.max(...clips.map(c => c.duration));
       console.log('[TEST] 最長クリップの長さ(秒):', maxDuration);
