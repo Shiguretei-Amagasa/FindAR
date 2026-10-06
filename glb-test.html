@@ -88,7 +88,28 @@
       clips.forEach((clip) => {
         mixer.clipAction(clip).play();
       });
+            // アニメーションを持たないメッシュ(=未組み立ての完成形)を、最初は非表示にしておく
+            const animatedNames = new Set(clips.map(c => c.name));
+      const noClipMeshes = [];
+      e.detail.model.traverse((node) => {
+        if (node.isMesh) {
+          const hasOwnClip = [...animatedNames].some(name => name.includes(node.name) || node.name.includes(name));
+          if (!hasOwnClip) {
+            node.visible = false;
+            noClipMeshes.push(node);
+          }
+        }
+      });
+      console.log('[TEST] 非表示にしたメッシュ数:', noClipMeshes.length);
+
+      // 最も長いクリップの再生時間を基準に、組み立て完了タイミングを計算する
+      const maxDuration = Math.max(...clips.map(c => c.duration));
+      console.log('[TEST] 最長クリップの長さ(秒):', maxDuration);
       console.log('[TEST] 全', clips.length, '個のクリップを同時再生開始');
+      setTimeout(() => {
+        noClipMeshes.forEach((node) => { node.visible = true; });
+        console.log('[TEST] 組み立て完了。完成形メッシュを表示に切り替えました');
+      }, maxDuration * 1000);
             // アニメーションを持たないメッシュ(=大元のオブジェクトの可能性)を特定する
             const animatedNames = new Set(clips.map(c => c.name));
       e.detail.model.traverse((node) => {
