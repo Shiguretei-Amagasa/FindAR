@@ -18,7 +18,6 @@
   <a-light type="ambient" color="#ffffff" intensity="1"></a-light>
   <a-light type="directional" color="#ffffff" intensity="1" position="1 1 1"></a-light>
 
-  <!-- カメラの正面5m先、等倍(scale指定なし)でモデルを配置 -->
   <a-entity
     id="model"
     gltf-model="url(./FindAR_appear.glb)"
@@ -31,109 +30,90 @@
 <script>
   document.getElementById('model').addEventListener('model-loaded', (e) => {
     console.log('[TEST] model-loaded 成功');
-    e.detail.model.scale.set(1, 1, 1);
-    e.detail.model.traverse((node) => {
-      if (node.isMesh && node.material) {
-        const materials = Array.isArray(node.material) ? node.material : [node.material];
-        materials.forEach((mat) => { mat.side = THREE.DoubleSide; });
-      }
-    });
-    console.log('[TEST] 全マテリアルを両面表示に変更しました');
-    e.detail.model.traverse((node) => {
+    const model = e.detail.model;
+
+    // ── スケールを1倍に固定 ──
+    model.scale.set(1, 1, 1);
+
+    // ── 全マテリアルを両面表示・不透明化する(KHR_materials_transmissionによる非表示を防ぐ) ──
+    model.traverse((node) => {
       if (node.isMesh && node.material) {
         const materials = Array.isArray(node.material) ? node.material : [node.material];
         materials.forEach((mat) => {
-          mat.transmission = 0;        // ガラス透過を無効化
-          mat.alphaMode = 'OPAQUE';    // 不透明として扱う(three.js内部プロパティではtransparentも併せて調整)
+          mat.side = THREE.DoubleSide;
+          mat.transmission = 0;
           mat.transparent = false;
           mat.opacity = 1;
           mat.depthWrite = true;
-          mat.needsUpdate = true;      // 変更をGPUに反映させるため必須
+          mat.needsUpdate = true;
         });
       }
     });
-    let meshCount = 0;
-    e.detail.model.traverse((node) => {
-      if (node.isMesh) {
-        meshCount++;
-        const mats = Array.isArray(node.material) ? node.material : [node.material];
-        mats.forEach((mat, i) => {
-          console.log(`[TEST診断] メッシュ${meshCount}-${i}:`, 
-            'visible:', node.visible,
-            'opacity:', mat.opacity,
-            'transparent:', mat.transparent,
-            'transmission:', mat.transmission,
-            'type:', mat.type
-          );
-        });
-      }
-    });
-    console.log('[TEST診断] メッシュ総数:', meshCount);
-    console.log('[TEST] transmission/透過設定を無効化しました');
-    console.log('[TEST] スケールを強制的に1,1,1へ上書きしました');
-    const mesh = e.detail.model;
-    const box = new THREE.Box3().setFromObject(mesh);
+
+    // ── サイズ・中心位置の確認(診断用) ──
+    const box = new THREE.Box3().setFromObject(model);
     const size = new THREE.Vector3();
     box.getSize(size);
     const center = new THREE.Vector3();
     box.getCenter(center);
-    console.log('[TEST] モデルの実寸サイズ(X,Y,Z):', size.x.toFixed(3), size.y.toFixed(3), size.z.toFixed(3));
-    console.log('[TEST] モデルの中心位置(原点からのズレ X,Y,Z):', center.x.toFixed(3), center.y.toFixed(3), center.z.toFixed(3));
-          // アニメーション再生
-          const clips = e.detail.model.animations;
+    console.log('[TEST] 実寸サイズ(X,Y,Z):', size.x.toFixed(3), size.y.toFixed(3), size.z.toFixed(3));
+    console.log('[TEST] 中心位置(X,Y,Z):', center.x.toFixed(3), center.y.toFixed(3), center.z.toFixed(3));
+
+    // ── アニメーション対象ノードを正規の方法で特定し、対象外(完成形)は先に非表示にする ──
+    const clips = model.animations;
     console.log('[TEST] アニメーション数:', clips ? clips.length : 0);
 
-    if (clips && clips.length > 0) {
-      const mixer = new THREE.AnimationMixer(e.detail.model);
-      clips.forEach((clip) => {
-        const clipAction = mixer.clipAction(clip);
-        clipAction.setLoop(THREE.LoopOnce);
-        clipAction.clampWhenFinished = true; // 終了後、最後のフレームの状態で止まる
-        clipAction.play();
-      });
-            // 各クリップが実際にどのノード(メッシュ)を操作対象にしているか、
-      // three.js内部の正規の方法(トラック名の解析)で正確に調べる
-      const animatedNodeNames = new Set();
-      clips.forEach((clip) => {
-        clip.tracks.forEach((track) => {
-          const parsed = THREE.PropertyBinding.parseTrackName(track.name);
-          animatedNodeNames.add(parsed.nodeName);
-        });
-      });
-
-      const noClipMeshes = [];
-      e.detail.model.traverse((node) => {
-        if (node.isMesh) {
-          if (!animatedNodeNames.has(node.name)) {
-            node.visible = false;
-            noClipMeshes.push(node);
-          }
-        }
-      });
-      console.log('[TEST] 非表示にしたメッシュ数:', noClipMeshes.length);
-      console.log('[TEST] アニメーション対象ノード数:', animatedNodeNames.size);
-
-      const maxDuration = Math.max(...clips.map(c => c.duration));
-      console.log('[TEST] 最長クリップの長さ(秒):', maxDuration);
-      
-      // 最も長いクリップの再生時間を基準に、組み立て完了タイミングを計算する
-      const maxDuration = Math.max(...clips.map(c => c.duration));
-      console.log('[TEST] 最長クリップの長さ(秒):', maxDuration);
-      console.log('[TEST] 全', clips.length, '個のクリップを同時再生開始');
-      setTimeout(() => {
-        noClipMeshes.forEach((node) => { node.visible = true; });
-        console.log('[TEST] 組み立て完了。完成形メッシュを表示に切り替えました');
-      }, maxDuration * 1000);
-            
-      const clock = new THREE.Clock();
-      function animate() {
-        requestAnimationFrame(animate);
-        mixer.update(clock.getDelta());
-      }
-      animate();
-    } else {
+    if (!clips || clips.length === 0) {
       console.log('[TEST] このモデルにはアニメーションが含まれていません');
+      return;
     }
+
+    const animatedNodeNames = new Set();
+    clips.forEach((clip) => {
+      clip.tracks.forEach((track) => {
+        const parsed = THREE.PropertyBinding.parseTrackName(track.name);
+        animatedNodeNames.add(parsed.nodeName);
+      });
+    });
+    console.log('[TEST] アニメーション対象ノード数:', animatedNodeNames.size);
+
+    const noClipMeshes = [];
+    let meshCount = 0;
+    model.traverse((node) => {
+      if (node.isMesh) {
+        meshCount++;
+        if (!animatedNodeNames.has(node.name)) {
+          node.visible = false;
+          noClipMeshes.push(node);
+        }
+      }
+    });
+    console.log('[TEST] メッシュ総数:', meshCount, '/ 非表示にした数:', noClipMeshes.length);
+
+    // ── 全クリップを1回だけ再生し、終了後は最後の状態で静止させる ──
+    const mixer = new THREE.AnimationMixer(model);
+    clips.forEach((clip) => {
+      const action = mixer.clipAction(clip);
+      action.setLoop(THREE.LoopOnce);
+      action.clampWhenFinished = true;
+      action.play();
+    });
+    console.log('[TEST] 全', clips.length, '個のクリップを1回再生で開始');
+
+    const clock = new THREE.Clock();
+    function animate() {
+      requestAnimationFrame(animate);
+      mixer.update(clock.getDelta());
+    }
+    animate();
+
+    // ── 最長クリップの再生が終わったタイミングで、完成形メッシュを表示に切り替える ──
+    const maxDuration = Math.max(...clips.map((c) => c.duration));
+    console.log('[TEST] 最長クリップの長さ(秒):', maxDuration);
+    setTimeout(() => {
+      noClipMeshes.forEach((node) => { node.visible = true; });
+      console.log('[TEST] 組み立て完了。完成形メッシュを表示に切り替えました');
+    }, maxDuration * 1000);
   });
 
   document.getElementById('model').addEventListener('model-error', (e) => {
