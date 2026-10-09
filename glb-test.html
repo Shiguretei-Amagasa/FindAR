@@ -68,32 +68,19 @@
       return;
     }
 
-    const animatedNodeNames = new Set();
-    clips.forEach((clip) => {
-      clip.tracks.forEach((track) => {
-        const parsed = THREE.PropertyBinding.parseTrackName(track.name);
-        animatedNodeNames.add(parsed.nodeName);
-      });
-    });
-    console.log('[TEST] アニメーション対象ノード数:', animatedNodeNames.size);
-    console.log('[TEST診断] アニメーション対象ノード名(最初の5件):', [...animatedNodeNames].slice(0, 5));
-    const meshNames = [];
-    model.traverse((node) => { if (node.isMesh) meshNames.push(node.name); });
-    console.log('[TEST診断] 実際のメッシュ名(最初の5件):', meshNames.slice(0, 5));
-    
     const noClipMeshes = [];
     let meshCount = 0;
     model.traverse((node) => {
       if (node.isMesh) {
         meshCount++;
-        if (!animatedNodeNames.has(node.name)) {
+        if (node.name.startsWith('Target_All')) {
           node.visible = false;
           noClipMeshes.push(node);
         }
       }
     });
-    console.log('[TEST] メッシュ総数:', meshCount, '/ 非表示にした数:', noClipMeshes.length);
-
+    console.log('[TEST] メッシュ総数:', meshCount, '/ 非表示にした数(Target_All):', noClipMeshes.length);
+    
     // ── 全クリップを1回だけ再生し、終了後は最後の状態で静止させる ──
     const mixer = new THREE.AnimationMixer(model);
     clips.forEach((clip) => {
