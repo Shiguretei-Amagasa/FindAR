@@ -76,7 +76,11 @@
       });
     });
     console.log('[TEST] アニメーション対象ノード数:', animatedNodeNames.size);
-
+    console.log('[TEST診断] アニメーション対象ノード名(最初の5件):', [...animatedNodeNames].slice(0, 5));
+    const meshNames = [];
+    model.traverse((node) => { if (node.isMesh) meshNames.push(node.name); });
+    console.log('[TEST診断] 実際のメッシュ名(最初の5件):', meshNames.slice(0, 5));
+    
     const noClipMeshes = [];
     let meshCount = 0;
     model.traverse((node) => {
