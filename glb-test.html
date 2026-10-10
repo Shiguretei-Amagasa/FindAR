@@ -59,15 +59,6 @@
     console.log('[TEST] 実寸サイズ(X,Y,Z):', size.x.toFixed(3), size.y.toFixed(3), size.z.toFixed(3));
     console.log('[TEST] 中心位置(X,Y,Z):', center.x.toFixed(3), center.y.toFixed(3), center.z.toFixed(3));
 
-    // ── アニメーション対象ノードを正規の方法で特定し、対象外(完成形)は先に非表示にする ──
-    const clips = model.animations;
-    console.log('[TEST] アニメーション数:', clips ? clips.length : 0);
-
-    if (!clips || clips.length === 0) {
-      console.log('[TEST] このモデルにはアニメーションが含まれていません');
-      return;
-    }
-
     const noClipMeshes = [];
     let meshCount = 0;
     model.traverse((node) => {
@@ -79,9 +70,9 @@
         }
       }
     });
+
     console.log('[TEST] メッシュ総数:', meshCount, '/ 非表示にした数(Target_All):', noClipMeshes.length);
     
-    // ── 全クリップを1回だけ再生し、終了後は最後の状態で静止させる ──
     const mixer = new THREE.AnimationMixer(model);
     clips.forEach((clip) => {
       const action = mixer.clipAction(clip);
@@ -101,10 +92,7 @@
     // ── 最長クリップの再生が終わったタイミングで、完成形メッシュを表示に切り替える ──
     const maxDuration = Math.max(...clips.map((c) => c.duration));
     console.log('[TEST] 最長クリップの長さ(秒):', maxDuration);
-    setTimeout(() => {
-      noClipMeshes.forEach((node) => { node.visible = true; });
-      console.log('[TEST] 組み立て完了。完成形メッシュを表示に切り替えました');
-    }, maxDuration * 1000);
+
   });
 
   document.getElementById('model').addEventListener('model-error', (e) => {
