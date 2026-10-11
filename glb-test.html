@@ -59,20 +59,18 @@
     console.log('[TEST] 実寸サイズ(X,Y,Z):', size.x.toFixed(3), size.y.toFixed(3), size.z.toFixed(3));
     console.log('[TEST] 中心位置(X,Y,Z):', center.x.toFixed(3), center.y.toFixed(3), center.z.toFixed(3));
 
-    const noClipMeshes = [];
-    let meshCount = 0;
-    model.traverse((node) => {
-      if (node.isMesh) {
-        meshCount++;
-        if (node.name.startsWith('Target_All')) {
-          node.visible = false;
-          noClipMeshes.push(node);
-        }
-      }
-    });
+    // ── アニメーション再生 ──
+    // Target_All系も含め、GLB自体にscale等のキーフレームが正しく作り込まれていることを
+    // ファイル解析で確認済みのため、手動での表示/非表示制御は一切行わない。
+    // 全クリップをそのまま1回再生するだけで、組み上がり→完成形の出現まで自然に繋がる。
+    const clips = model.animations;
+    console.log('[TEST] アニメーション数:', clips ? clips.length : 0);
 
-    console.log('[TEST] メッシュ総数:', meshCount, '/ 非表示にした数(Target_All):', noClipMeshes.length);
-    
+    if (!clips || clips.length === 0) {
+      console.log('[TEST] このモデルにはアニメーションが含まれていません');
+      return;
+    }
+
     const mixer = new THREE.AnimationMixer(model);
     clips.forEach((clip) => {
       const action = mixer.clipAction(clip);
@@ -88,11 +86,6 @@
       mixer.update(clock.getDelta());
     }
     animate();
-
-    // ── 最長クリップの再生が終わったタイミングで、完成形メッシュを表示に切り替える ──
-    const maxDuration = Math.max(...clips.map((c) => c.duration));
-    console.log('[TEST] 最長クリップの長さ(秒):', maxDuration);
-
   });
 
   document.getElementById('model').addEventListener('model-error', (e) => {
