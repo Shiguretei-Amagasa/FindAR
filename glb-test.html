@@ -3,94 +3,120 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GLB単体表示テスト</title>
+<title>GLB単体表示テスト(appear → loop)</title>
 <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
 <script>eruda.init();</script>
 <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
 </head>
 <body style="margin:0;">
 
-<div style="position:fixed; top:8px; left:8px; right:8px; z-index:600; color:#fff; background:rgba(0,0,0,0.6); padding:6px 10px; font-family:sans-serif; font-size:13px; border-radius:6px;">
-  AR・GPSなし。モデルを正面の固定位置に置くだけのテストです
+<div id="info" style="position:fixed; top:8px; left:8px; right:8px; z-index:600; color:#fff; background:rgba(0,0,0,0.6); padding:6px 10px; font-family:sans-serif; font-size:13px; border-radius:6px; line-height:1.5;">
+  読み込み中...
 </div>
 
 <a-scene background="color: #222">
   <a-light type="ambient" color="#ffffff" intensity="1"></a-light>
   <a-light type="directional" color="#ffffff" intensity="1" position="1 1 1"></a-light>
 
-  <a-entity
-    id="model"
-    gltf-model="url(./FindAR_appear.glb)"
-    position="0 0 -5"
-  ></a-entity>
+  <!-- appear(0〜28f・1回再生)と loop(28〜90f・ループ再生)を、同じ位置に重ねて読み込む -->
+  <a-entity id="appear" gltf-model="url(./FindAR_appear.glb)" position="0 0 -5"></a-entity>
+  <a-entity id="loop" gltf-model="url(./FindAR_loop.glb)" position="0 0 -5" visible="false"></a-entity>
 
   <a-camera position="0 1.6 0"></a-camera>
 </a-scene>
 
 <script>
-  document.getElementById('model').addEventListener('model-loaded', (e) => {
-    console.log('[TEST] model-loaded 成功');
-    const model = e.detail.model;
+  // ════════════════════════════════════════════════
+  // 設定(GLBの解析結果に基づく。両GLBとも 24fps・0〜89フレームの同じ長さのアニメーションを持つ)
+  // ════════════════════════════════════════════════
+  const FPS = 24;
+  const APPEAR_END = 28 / FPS;   // appear: 0〜28f を1回だけ再生
+  const LOOP_START = 28 / FPS;   // loop:   28〜90f をループ再生
+  const LOOP_END   = 90 / FPS;
+  const EPS = 0.0001;
 
-    // ── スケールを1倍に固定 ──
-    model.scale.set(1, 1, 1);
+  // 材質の扱い(URLの ?mat= で切り替え。ページを開き直すだけで試せる)
+  //   mat=1 (既定): 透過(transmission)だけ無効化。元のalpha(表示/非表示)と半透明ブレンドは保持
+  //   mat=2        : 1 + 深度書き込みを有効化
+  //   mat=3        : 診断用。全パーツを不透明化(元のalphaは無視される。従来の暫定処置)
+  const MAT_MODE = new URLSearchParams(location.search).get('mat') || '1';
 
-    // ── 全マテリアルを両面表示・不透明化する(KHR_materials_transmissionによる非表示を防ぐ) ──
+  const infoEl = document.getElementById('info');
+  const appearEl = document.getElementById('appear');
+  const loopEl = document.getElementById('loop');
+
+  const loaded = {};   // { appear: {model, mixer, duration}, loop: {...} }
+  let startMs = null;
+  let phase = 'wait';
+
+  function prepare(name, model) {
+    // ── 材質の調整(元のalpha=見た目の「面/縁」の違いをできるだけ保つ) ──
+    let hiddenByAlpha = 0;
     model.traverse((node) => {
-      if (node.isMesh && node.material) {
-        const materials = Array.isArray(node.material) ? node.material : [node.material];
-        materials.forEach((mat) => {
-          mat.side = THREE.DoubleSide;
-          mat.transmission = 0;
-          mat.transparent = false;
-          mat.opacity = 1;
-          mat.depthWrite = true;
-          mat.needsUpdate = true;
-        });
-      }
+      if (!node.isMesh || !node.material) return;
+      const mats = Array.isArray(node.material) ? node.material : [node.material];
+      mats.forEach((mat) => {
+        mat.transmission = 0;                    // 透過表現は、この環境で描画が破綻するため無効化
+        if (MAT_MODE === '2') mat.depthWrite = true;
+        if (MAT_MODE === '3') {                  // 診断用の一括不透明化
+          mat.transparent = false; mat.opacity = 1; mat.depthWrite = true;
+        }
+        mat.needsUpdate = true;
+        if (MAT_MODE !== '3' && mat.opacity <= 0.001) {  // alpha=0のパーツは、描画自体をやめる
+          node.visible = false; hiddenByAlpha++;
+        }
+      });
     });
 
-    // ── サイズ・中心位置の確認(診断用) ──
-    const box = new THREE.Box3().setFromObject(model);
-    const size = new THREE.Vector3();
-    box.getSize(size);
-    const center = new THREE.Vector3();
-    box.getCenter(center);
-    console.log('[TEST] 実寸サイズ(X,Y,Z):', size.x.toFixed(3), size.y.toFixed(3), size.z.toFixed(3));
-    console.log('[TEST] 中心位置(X,Y,Z):', center.x.toFixed(3), center.y.toFixed(3), center.z.toFixed(3));
-
-    // ── アニメーション再生 ──
-    // Target_All系も含め、GLB自体にscale等のキーフレームが正しく作り込まれていることを
-    // ファイル解析で確認済みのため、手動での表示/非表示制御は一切行わない。
-    // 全クリップをそのまま1回再生するだけで、組み上がり→完成形の出現まで自然に繋がる。
-    const clips = model.animations;
-    console.log('[TEST] アニメーション数:', clips ? clips.length : 0);
-
-    if (!clips || clips.length === 0) {
-      console.log('[TEST] このモデルにはアニメーションが含まれていません');
-      return;
-    }
-
+    // ── アニメーションの準備(全クリップを再生状態にし、時刻は自前で指定する) ──
+    const clips = model.animations || [];
     const mixer = new THREE.AnimationMixer(model);
-    clips.forEach((clip) => {
-      const action = mixer.clipAction(clip);
-      action.setLoop(THREE.LoopOnce);
-      action.clampWhenFinished = true;
-      action.play();
-    });
-    console.log('[TEST] 全', clips.length, '個のクリップを1回再生で開始');
+    clips.forEach((clip) => mixer.clipAction(clip).play());
+    const duration = Math.max(...clips.map((c) => c.duration));
 
-    const clock = new THREE.Clock();
-    function animate() {
-      requestAnimationFrame(animate);
-      mixer.update(clock.getDelta());
+    console.log(`[${name}] 読み込み完了 / クリップ数: ${clips.length} / 長さ: ${duration.toFixed(3)}秒 / alpha=0で非表示にしたパーツ: ${hiddenByAlpha}`);
+    loaded[name] = { model, mixer, duration };
+
+    if (loaded.appear && loaded.loop) {
+      loaded.loop.mixer.setTime(LOOP_START);   // 切り替え前に姿勢を確定しておく
+      phase = 'appear';
+      requestAnimationFrame(tick);
     }
-    animate();
-  });
+  }
 
-  document.getElementById('model').addEventListener('model-error', (e) => {
-    console.error('[TEST] model-error:', e.detail);
-  });
+  // mixer.setTime(t) は「全アクションを0に戻してから t 秒へ進める」ため、指定した時刻の姿勢になる。
+  // 長さ以上を指定すると先頭に戻ってしまうため、末尾の1フレーム手前に丸める。
+  function seek(entry, t) {
+    entry.mixer.setTime(Math.min(Math.max(t, 0), entry.duration - EPS));
+  }
+
+  function tick(nowMs) {
+    if (startMs === null) startMs = nowMs;
+    const elapsed = (nowMs - startMs) / 1000;
+
+    if (elapsed < APPEAR_END) {
+      seek(loaded.appear, elapsed);
+      infoEl.innerHTML = `appear 再生中 (1回) / ${(elapsed * FPS).toFixed(1)}f / mat=${MAT_MODE}`;
+    } else {
+      if (phase === 'appear') {                    // 28f で appear → loop に切り替え(1回だけ実行)
+        seek(loaded.appear, APPEAR_END);
+        appearEl.object3D.visible = false;
+        loopEl.object3D.visible = true;
+        phase = 'loop';
+        console.log('[SEQ] appear終了 → loop開始');
+      }
+      const loopLen = LOOP_END - LOOP_START;
+      const t = LOOP_START + ((elapsed - APPEAR_END) % loopLen);
+      seek(loaded.loop, t);
+      infoEl.innerHTML = `loop 再生中 (ループ) / ${(t * FPS).toFixed(1)}f / mat=${MAT_MODE}`;
+    }
+    requestAnimationFrame(tick);
+  }
+
+  appearEl.addEventListener('model-loaded', (e) => prepare('appear', e.detail.model));
+  loopEl.addEventListener('model-loaded', (e) => prepare('loop', e.detail.model));
+  appearEl.addEventListener('model-error', (e) => console.error('[appear] model-error:', e.detail));
+  loopEl.addEventListener('model-error', (e) => console.error('[loop] model-error:', e.detail));
 </script>
 </body>
 </html>
