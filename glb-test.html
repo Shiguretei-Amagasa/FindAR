@@ -30,24 +30,24 @@
   // 設定(GLBの解析結果に基づく。24fps)
   // ════════════════════════════════════════════════
   const FPS = 24;
-  const HANDOFF = 28 / FPS;   // appear は 0〜28f を1回だけ再生し、28f で loop に切り替える
+  const HANDOFF = 28 / FPS;   // appear は 0〜28f を1回だけ再生し、28f から loop に切り替える
   const EPS = 0.0001;
 
-  // 材質の扱い(URLの ?mat= で切り替え)
-  //   mat=1 (既定): 透過(transmission)だけ無効化。元のalphaと半透明ブレンドは保持
-  //   mat=2        : 1 + 深度書き込みを有効化
-  //   mat=3        : 診断用。全パーツを不透明化
-  const MAT_MODE = new URLSearchParams(location.search).get('mat') || '1';
+  const params = new URLSearchParams(location.search);
+  // 材質の扱い(?mat=)  1(既定): 透過だけ無効化 / 2: 1+深度書き込み / 3: 診断用の全不透明化(クロスフェード不可)
+  const MAT_MODE = params.get('mat') || '1';
+  // appear→loop のクロスフェードの長さ(フレーム数)(?fade=)。0 なら瞬時に切り替え
+  const FADE = (params.has('fade') ? parseFloat(params.get('fade')) : 8) / FPS;
+  const CAN_FADE = MAT_MODE !== '3' && FADE > 0;
 
   const infoEl = document.getElementById('info');
   const appearEl = document.getElementById('appear');
   const loopEl = document.getElementById('loop');
 
-  const loaded = {};   // { appear: {model, mixer, duration}, loop: {..., cycleStart, cycleEnd} }
+  const loaded = {};   // { appear: {model, mixer, duration, fadeMats}, loop: {..., cycleStart, cycleEnd} }
   let startMs = null;
   let phase = 'wait';
 
-  // クリップが持つキーフレームの最初と最後の時刻(秒)
   function keyRange(clip) {
     let lo = Infinity, hi = -Infinity;
     clip.tracks.forEach((tr) => {
@@ -60,6 +60,7 @@
   function prepare(name, model) {
     // ── 材質の調整(元のalphaを保ち、透過表現(transmission)だけ無効化) ──
     let hiddenByAlpha = 0;
+    const fadeMats = new Set();   // クロスフェードで不透明度を変える材質(表示されるパーツのもの)
     model.traverse((node) => {
       if (!node.isMesh || !node.material) return;
       const mats = Array.isArray(node.material) ? node.material : [node.material];
@@ -67,8 +68,10 @@
         mat.transmission = 0;
         if (MAT_MODE === '2') mat.depthWrite = true;
         if (MAT_MODE === '3') { mat.transparent = false; mat.opacity = 1; mat.depthWrite = true; }
+        mat.userData.baseOpacity = mat.opacity;
         mat.needsUpdate = true;
         if (MAT_MODE !== '3' && mat.opacity <= 0.001) { node.visible = false; hiddenByAlpha++; }
+        else if (CAN_FADE) { mat.transparent = true; fadeMats.add(mat); }
       });
     });
 
@@ -76,36 +79,36 @@
     let clips = model.animations || [];
     let cycleStart = 0, cycleEnd = 0;
     if (name === 'loop' && clips.length > 1) {
-      // loopファイルには、同じオブジェクトに付いたクリップが複数ある。
-      // 全部を同時に再生すると、同じ動きが混ざって平均されてしまうため、
+      // 同じオブジェクトに付いたクリップが複数ある場合、全部を同時に再生すると動きが混ざって平均されるため、
       // 最後のキーが最も遅い(=30〜89fで1周するもの)1つだけを使う。
       const chosen = clips.reduce((a, b) => (keyRange(b)[1] > keyRange(a)[1] ? b : a));
       console.log('[loop] クリップ一覧:', clips.map((c) => `${c.name}(${(keyRange(c)[0] * FPS).toFixed(0)}〜${(keyRange(c)[1] * FPS).toFixed(0)}f)`).join(' / '));
       console.log('[loop] 再生に使うクリップ:', chosen.name);
       clips = [chosen];
     }
-    if (name === 'loop' && clips.length === 1) {
-      [cycleStart, cycleEnd] = keyRange(clips[0]);
-    }
+    if (name === 'loop' && clips.length === 1) [cycleStart, cycleEnd] = keyRange(clips[0]);
 
     const mixer = new THREE.AnimationMixer(model);
     clips.forEach((clip) => mixer.clipAction(clip).play());
     const duration = Math.max(...clips.map((c) => c.duration));
 
-    console.log(`[${name}] 読み込み完了 / 再生クリップ数: ${clips.length} / 長さ: ${duration.toFixed(3)}秒 / alpha=0で非表示にしたパーツ: ${hiddenByAlpha}`);
-    loaded[name] = { model, mixer, duration, cycleStart, cycleEnd };
+    console.log(`[${name}] 読み込み完了 / 再生クリップ数: ${clips.length} / 長さ: ${duration.toFixed(3)}秒 / alpha=0で非表示: ${hiddenByAlpha} / フェード対象材質: ${fadeMats.size}`);
+    loaded[name] = { model, mixer, duration, cycleStart, cycleEnd, fadeMats };
 
     if (loaded.appear && loaded.loop) {
-      loaded.loop.mixer.setTime(HANDOFF);   // 切り替え前に姿勢を確定しておく
+      loaded.loop.mixer.setTime(HANDOFF);
       phase = 'appear';
       requestAnimationFrame(tick);
     }
   }
 
-  // mixer.setTime(t): 全アクションを0に戻してから t 秒へ進める(=指定時刻の姿勢)。
-  // 長さ以上を指定すると先頭に戻るため、末尾の直前に丸める。
   function seek(entry, t) {
     entry.mixer.setTime(Math.min(Math.max(t, 0), entry.duration - EPS));
+  }
+
+  // 不透明度を、元の値の k 倍にする(k=0 で透明、k=1 で元の状態)
+  function setOpacity(entry, k) {
+    entry.fadeMats.forEach((m) => { m.opacity = m.userData.baseOpacity * k; });
   }
 
   function tick(nowMs) {
@@ -114,22 +117,36 @@
 
     if (elapsed < HANDOFF) {
       seek(loaded.appear, elapsed);
-      infoEl.innerHTML = `appear 再生中 (1回) / ${(elapsed * FPS).toFixed(1)}f / mat=${MAT_MODE}`;
+      infoEl.innerHTML = `appear 再生中 (1回) / ${(elapsed * FPS).toFixed(1)}f / mat=${MAT_MODE} fade=${(FADE * FPS).toFixed(0)}f`;
     } else {
-      if (phase === 'appear') {                    // 28f で appear → loop に切り替え(1回だけ実行)
+      const since = elapsed - HANDOFF;
+
+      if (phase === 'appear') {                    // 28f: appearの姿を確定し、loopを表示する(1回だけ実行)
         seek(loaded.appear, HANDOFF);
-        appearEl.object3D.visible = false;
         loopEl.object3D.visible = true;
-        phase = 'loop';
-        console.log('[SEQ] appear終了 → loop開始');
+        if (CAN_FADE) setOpacity(loaded.loop, 0);
+        phase = CAN_FADE ? 'fade' : 'loop';
+        if (!CAN_FADE) appearEl.object3D.visible = false;
+        console.log('[SEQ] appear終了 → loop開始 /', CAN_FADE ? 'クロスフェード' : '瞬時に切り替え');
       }
-      // loop: 切り替え時(28f)から、クリップの最後のキーまで進み、そこからは「最初のキー〜最後のキー」を繰り返す。
+
+      // loop: 28fから最後のキー(89f)まで進み、そこからは「最初のキー(30f)〜最後のキー(89f)」を繰り返す。
       // 最初と最後のキーは同じ姿勢のため、継ぎ目はなめらかに繋がる。
       const L = loaded.loop;
       let t = elapsed;
       if (t >= L.cycleEnd) t = L.cycleStart + ((t - L.cycleStart) % (L.cycleEnd - L.cycleStart));
       seek(L, t);
-      infoEl.innerHTML = `loop 再生中 (ループ) / ${(t * FPS).toFixed(1)}f / mat=${MAT_MODE}`;
+
+      let label = 'loop 再生中 (ループ)';
+      if (phase === 'fade') {                      // appearを薄くしながら、loopを濃くする
+        const k = Math.min(since / FADE, 1);
+        const e = k * k * (3 - 2 * k);             // なめらかな変化(smoothstep)
+        setOpacity(loaded.appear, 1 - e);
+        setOpacity(loaded.loop, e);
+        label = `クロスフェード中 ${(k * 100).toFixed(0)}%`;
+        if (k >= 1) { appearEl.object3D.visible = false; phase = 'loop'; }
+      }
+      infoEl.innerHTML = `${label} / ${(t * FPS).toFixed(1)}f / mat=${MAT_MODE} fade=${(FADE * FPS).toFixed(0)}f`;
     }
     requestAnimationFrame(tick);
   }
