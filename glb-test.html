@@ -1,24 +1,24 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GLB単体表示テスト(appear → loop)</title>
+<title>GLB連続再生テスト（appear → loop）</title>
 <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
 <script>eruda.init();</script>
 <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
 </head>
 <body style="margin:0;">
 
-<div id="info" style="position:fixed; top:8px; left:8px; right:8px; z-index:600; color:#fff; background:rgba(0,0,0,0.6); padding:6px 10px; font-family:sans-serif; font-size:13px; border-radius:6px; line-height:1.5;">
-  読み込み中...
+<div id="info" style="position:fixed;top:8px;left:8px;right:8px;z-index:600;color:#fff;background:rgba(0,0,0,.65);padding:6px 10px;font-family:sans-serif;font-size:13px;border-radius:6px;line-height:1.5;">
+  GLB読み込み中...
 </div>
 
 <a-scene background="color: #222">
   <a-light type="ambient" color="#ffffff" intensity="1"></a-light>
   <a-light type="directional" color="#ffffff" intensity="1" position="1 1 1"></a-light>
 
-  <!-- appear(0〜28f・1回再生)と loop(28fから・ループ再生)を、同じ位置に重ねて読み込む -->
+  <!-- appearとloopは同じ位置に配置。両方を先読みする -->
   <a-entity id="appear" gltf-model="url(./FindAR_appear.glb)" position="0 0 -5"></a-entity>
   <a-entity id="loop" gltf-model="url(./FindAR_loop.glb)" position="0 0 -5" visible="false"></a-entity>
 
@@ -26,167 +26,234 @@
 </a-scene>
 
 <script>
-  // ════════════════════════════════════════════════
-  // 設定(GLBの解析結果に基づく。24fps)
-  // ════════════════════════════════════════════════
+(() => {
+  // ===== 設定 =====
   const FPS = 24;
-  const HANDOFF = 28 / FPS;   // appear は 0〜28f を1回だけ再生し、28f から loop に切り替える
+  const HANDOFF = 28 / FPS;       // appearからloopへ引き継ぐ時刻：28f（約1.167秒）
+  const FADE = 8 / FPS;           // 切り替え時のフェード：8f
+  const CYCLE_Y_OFFSET = -0.7;    // 球Action終端(約Y=2.8)と球Action.003始端(Y=3.5)を合わせる補正
+  const RY = 90;                  // 向き。逆なら -90
   const EPS = 0.0001;
-
-  const params = new URLSearchParams(location.search);
-  // 材質の扱い(?mat=)  1(既定): 透過だけ無効化 / 2: 1+深度書き込み / 3: 診断用の全不透明化(クロスフェード不可)
-  const MAT_MODE = params.get('mat') || '1';
-  // appear→loop のクロスフェードの長さ(フレーム数)(?fade=)。0 なら瞬時に切り替え
-  const FADE = (params.has('fade') ? parseFloat(params.get('fade')) : 8) / FPS;
-  const CAN_FADE = MAT_MODE !== '3' && FADE > 0;
-  // 縦軸(Y軸)まわりの回転角(度)(?ry=)。向きが逆なら -90 を指定する
-  const RY = params.has('ry') ? parseFloat(params.get('ry')) : 90;
 
   const infoEl = document.getElementById('info');
   const appearEl = document.getElementById('appear');
   const loopEl = document.getElementById('loop');
-
-  // appear と loop は同じ位置・同じ向きで重ねるため、同じ回転を両方に与える
   appearEl.setAttribute('rotation', `0 ${RY} 0`);
   loopEl.setAttribute('rotation', `0 ${RY} 0`);
 
   const loaded = {};
   let startMs = null;
   let phase = 'wait';
+  let cycleStarted = false;
 
   function keyRange(clip) {
     let lo = Infinity, hi = -Infinity;
-    clip.tracks.forEach((tr) => {
-      lo = Math.min(lo, tr.times[0]);
-      hi = Math.max(hi, tr.times[tr.times.length - 1]);
+    clip.tracks.forEach(track => {
+      if (!track.times || track.times.length === 0) return;
+      lo = Math.min(lo, track.times[0]);
+      hi = Math.max(hi, track.times[track.times.length - 1]);
     });
     return [lo, hi];
   }
 
-  // 1つのクリップだけを再生する、専用のミキサーを作る
-  function makeSegment(model, clip) {
-    const [start, end] = keyRange(clip);
-    const mixer = new THREE.AnimationMixer(model);
-    mixer.clipAction(clip).play();
-    return { name: clip.name, mixer, start, end, duration: clip.duration };
+  function findClip(clips, exactName) {
+    return clips.find(c => c.name === exactName);
   }
 
-  function prepare(name, model) {
-    // ── 材質の調整(元のalphaを保ち、透過表現(transmission)だけ無効化) ──
-    let hiddenByAlpha = 0;
+  function setOneShot(action) {
+    action.setLoop(THREE.LoopOnce, 1);
+    action.clampWhenFinished = true;
+    action.play();
+    return action;
+  }
+
+  function prepareMaterials(model) {
     const fadeMats = new Set();
-    model.traverse((node) => {
+    let hiddenByAlpha = 0;
+    model.traverse(node => {
       if (!node.isMesh || !node.material) return;
       const mats = Array.isArray(node.material) ? node.material : [node.material];
-      mats.forEach((mat) => {
-        mat.transmission = 0;
-        if (MAT_MODE === '2') mat.depthWrite = true;
-        if (MAT_MODE === '3') { mat.transparent = false; mat.opacity = 1; mat.depthWrite = true; }
-        mat.userData.baseOpacity = mat.opacity;
+      mats.forEach(mat => {
+        // transmissionの負荷・表示差を避ける。元のopacityは維持する
+        if ('transmission' in mat) mat.transmission = 0;
+        mat.userData.baseOpacity = (typeof mat.opacity === 'number') ? mat.opacity : 1;
+        mat.transparent = true;
         mat.needsUpdate = true;
-        if (MAT_MODE !== '3' && mat.opacity <= 0.001) { node.visible = false; hiddenByAlpha++; }
-        else if (CAN_FADE) { mat.transparent = true; fadeMats.add(mat); }
+        fadeMats.add(mat);
+        if (mat.userData.baseOpacity <= 0.001) hiddenByAlpha++;
       });
     });
+    return { fadeMats, hiddenByAlpha };
+  }
 
+  function setOpacity(entry, amount) {
+    entry.fadeMats.forEach(mat => {
+      mat.opacity = mat.userData.baseOpacity * amount;
+      mat.needsUpdate = true;
+    });
+  }
+
+  function prepareAppear(model) {
     const clips = model.animations || [];
-    const entry = { model, fadeMats };
+    const rootMotion = findClip(clips, '球Action');
+    const duplicateRootMotion = findClip(clips, '球Action.003');
+    const mixer = new THREE.AnimationMixer(model);
+    const mats = prepareMaterials(model);
 
-    if (name === 'appear') {
-      // appear: 全クリップを同時に再生する(それぞれ別のオブジェクトを動かすクリップのため)
-      const mixer = new THREE.AnimationMixer(model);
-      clips.forEach((clip) => mixer.clipAction(clip).play());
-      entry.mixer = mixer;
-      entry.duration = Math.max(...clips.map((c) => c.duration));
-    } else {
-      // loop: 同じオブジェクトに付いた複数のクリップを、同時ではなく「順番に」使う。
-      //   cont  : 28fをまたぐクリップ  = appearの動きの続き(28fの姿勢がappearと一致する)
-      //   cycle : 残りのうち最後まで続くクリップ = その後に繰り返す1周分の動き
-      const ranges = clips.map((c) => ({ clip: c, r: keyRange(c) }));
-      const contR = ranges.find((x) => x.r[0] < HANDOFF - EPS && x.r[1] > HANDOFF + EPS);
-      const cycleR = ranges.filter((x) => x !== contR).sort((a, b) => b.r[1] - a.r[1])[0] || contR;
-      entry.cont = contR ? makeSegment(model, contR.clip) : null;
-      entry.cycle = makeSegment(model, cycleR.clip);
-      console.log('[loop] クリップ一覧:', ranges.map((x) => `${x.clip.name}(${(x.r[0] * FPS).toFixed(0)}〜${(x.r[1] * FPS).toFixed(0)}f)`).join(' / '));
-      console.log('[loop] 28fからの続き:', entry.cont ? entry.cont.name : 'なし', '/ 繰り返し:', entry.cycle.name);
-    }
+    // パーツごとのクリップは全て再生。ただしTarget_Allを同時に動かす
+    // 球Action.003は除外し、Target_Allを操作するクリップは球Actionだけにする。
+    clips.forEach(clip => {
+      if (clip === duplicateRootMotion) return;
+      const action = mixer.clipAction(clip);
+      setOneShot(action);
+    });
 
-    console.log(`[${name}] 読み込み完了 / クリップ数: ${clips.length} / alpha=0で非表示: ${hiddenByAlpha} / フェード対象材質: ${fadeMats.size}`);
-    loaded[name] = entry;
-
-    if (loaded.appear && loaded.loop) {
-      seekLoop(0);          // 切り替え前に、loopの28fの姿勢を確定しておく
-      phase = 'appear';
-      requestAnimationFrame(tick);
-    }
+    loaded.appear = {
+      model, mixer, clips, rootMotion,
+      fadeMats: mats.fadeMats,
+      hiddenByAlpha: mats.hiddenByAlpha
+    };
+    console.log('[appear] clips:', clips.length,
+      '/ 球Action:', !!rootMotion,
+      '/ 球Action.003除外:', !!duplicateRootMotion,
+      '/ alpha=0材質:', mats.hiddenByAlpha);
+    maybeStart();
   }
 
-  function seekSeg(seg, t) {
-    seg.mixer.setTime(Math.min(Math.max(t, 0), seg.duration - EPS));
+  function prepareLoop(model) {
+    const clips = model.animations || [];
+    const contClip = findClip(clips, '球Action');
+    const rawCycleClip = findClip(clips, '球Action.003');
+    const mats = prepareMaterials(model);
+
+    if (!contClip || !rawCycleClip) {
+      infoEl.textContent = 'エラー：loop内に「球Action」または「球Action.003」が見つかりません。コンソールを確認してください。';
+      console.error('[loop] 必要なクリップがありません:', clips.map(c => c.name));
+      return;
+    }
+
+    // 球Action.003のキーフレーム時刻は1.25秒開始なので、0秒開始にずらした
+    // 複製クリップを作る。これにより3.708秒で終わった後、1.25秒に戻る飛びを防ぐ。
+    const [cycleStart, cycleEnd] = keyRange(rawCycleClip);
+    const cycleClip = rawCycleClip.clone();
+    cycleClip.tracks.forEach(track => track.shift(-cycleStart));
+    cycleClip.resetDuration();
+    const cycleDuration = cycleEnd - cycleStart;
+
+    const mixer = new THREE.AnimationMixer(model);
+    const contAction = mixer.clipAction(contClip);
+    setOneShot(contAction);
+    contAction.enabled = true;
+
+    loaded.loop = {
+      model, mixer, contClip, contAction,
+      cycleClip, cycleStart, cycleEnd, cycleDuration,
+      cycleAction: null,
+      fadeMats: mats.fadeMats,
+      hiddenByAlpha: mats.hiddenByAlpha
+    };
+    console.log('[loop] 継続クリップ:', contClip.name, keyRange(contClip),
+      '/ ループクリップ:', rawCycleClip.name, keyRange(rawCycleClip),
+      '/ cycle duration:', cycleDuration);
+    maybeStart();
   }
 
-  // loop: s = 切り替え(28f)からの経過秒。 28f→(続きのクリップの最後)→(繰り返しの最初〜最後を繰り返す)
-  function seekLoop(s) {
+  function maybeStart() {
+    if (!loaded.appear || !loaded.loop || phase !== 'wait') return;
+    // 切り替え直前にloop側の初期状態を作り、両モデルのアニメーション時刻を同期する
+    loaded.loop.mixer.setTime(0);
+    phase = 'appear';
+    infoEl.textContent = '準備完了：appear → loop';
+    requestAnimationFrame(tick);
+  }
+
+  function startCycle() {
+    if (cycleStarted) return;
     const L = loaded.loop;
-    const tNow = HANDOFF + s;
-    let seg, t;
-    if (L.cont && tNow < L.cont.end) {
-      seg = L.cont; t = tNow;
-    } else if (L.cont) {
-      const u = tNow - L.cont.end;
-      seg = L.cycle; t = L.cycle.start + (u % (L.cycle.end - L.cycle.start));
-    } else {
-      seg = L.cycle;
-      t = tNow < L.cycle.end ? tNow : L.cycle.start + ((tNow - L.cycle.start) % (L.cycle.end - L.cycle.start));
-    }
-    seekSeg(seg, t);
-    return { seg, t };
+    // 球Actionの終端はY約2.8、球Action.003の始端はY約3.5。
+    // 親エンティティをY=-0.7移動して位置を合わせる。
+    loopEl.object3D.position.y = CYCLE_Y_OFFSET;
+
+    L.contAction.stop();
+    L.mixer.stopAllAction();
+    L.cycleAction = L.mixer.clipAction(L.cycleClip);
+    L.cycleAction.setLoop(THREE.LoopRepeat, Infinity);
+    L.cycleAction.clampWhenFinished = false;
+    L.cycleAction.play();
+    cycleStarted = true;
+    console.log('[SEQ] 球Action → 補正済み球Action.003のループ');
   }
 
-  function setOpacity(entry, k) {
-    entry.fadeMats.forEach((m) => { m.opacity = m.userData.baseOpacity * k; });
+  function updateLoop(elapsed) {
+    const L = loaded.loop;
+    const contEnd = keyRange(L.contClip)[1];
+    if (elapsed < contEnd - EPS) {
+      // HANDOFF後も球Actionをappearと同じ絶対時刻で進める
+      L.mixer.setTime(Math.max(0, elapsed));
+      return { name: L.contClip.name, time: elapsed };
+    }
+
+    startCycle();
+    const cycleElapsed = Math.max(0, elapsed - contEnd);
+    const localTime = cycleElapsed % L.cycleDuration;
+    // cycleClipのキー時刻は0開始に補正済み。周期の継ぎ目は元データの始端・終端を使う。
+    L.mixer.setTime(localTime);
+    return { name: L.cycleClip.name, time: L.cycleStart + localTime };
   }
 
   function tick(nowMs) {
     if (startMs === null) startMs = nowMs;
     const elapsed = (nowMs - startMs) / 1000;
-    const tag = `mat=${MAT_MODE} fade=${(FADE * FPS).toFixed(0)}f ry=${RY}`;
 
     if (elapsed < HANDOFF) {
-      seekSeg(loaded.appear, elapsed);
-      infoEl.innerHTML = `appear 再生中 (1回) / ${(elapsed * FPS).toFixed(1)}f / ${tag}`;
+      loaded.appear.mixer.setTime(elapsed);
+      infoEl.textContent = `appear再生中 ${(elapsed * FPS).toFixed(1)}f / 切替 ${HANDOFF * FPS}f`;
     } else {
-      const since = elapsed - HANDOFF;
-
-      if (phase === 'appear') {                    // 28f: appearの姿を確定し、loopを表示する(1回だけ実行)
-        seekSeg(loaded.appear, HANDOFF);
+      if (phase === 'appear') {
         loopEl.object3D.visible = true;
-        if (CAN_FADE) setOpacity(loaded.loop, 0);
-        phase = CAN_FADE ? 'fade' : 'loop';
-        if (!CAN_FADE) appearEl.object3D.visible = false;
-        console.log('[SEQ] appear終了 → loop開始 /', CAN_FADE ? 'クロスフェード' : '瞬時に切り替え');
+        setOpacity(loaded.loop, 0);
+        phase = 'fade';
+        console.log('[SEQ] appear → loop：フェード開始');
       }
 
-      const { seg, t } = seekLoop(since);
+      // 切り替え後もappearをフェード終了まで同じ時刻で進め、loop側と同期する
+      loaded.appear.mixer.setTime(elapsed);
+      const loopState = updateLoop(elapsed);
 
-      let label = 'loop 再生中';
       if (phase === 'fade') {
-        const k = Math.min(since / FADE, 1);
-        const e = k * k * (3 - 2 * k);
-        setOpacity(loaded.appear, 1 - e);
-        setOpacity(loaded.loop, e);
-        label = `クロスフェード中 ${(k * 100).toFixed(0)}%`;
-        if (k >= 1) { appearEl.object3D.visible = false; phase = 'loop'; }
+        const k = Math.min(1, (elapsed - HANDOFF) / FADE);
+        const eased = k * k * (3 - 2 * k);
+        setOpacity(loaded.appear, 1 - eased);
+        setOpacity(loaded.loop, eased);
+        infoEl.textContent = `クロスフェード ${(k * 100).toFixed(0)}% / ${loopState.name}`;
+        if (k >= 1) {
+          appearEl.object3D.visible = false;
+          phase = 'loop';
+        }
+      } else {
+        infoEl.textContent = `loop再生中：${loopState.name} / ${(loopState.time * FPS).toFixed(1)}f`;
       }
-      infoEl.innerHTML = `${label} (${seg.name}) / ${(t * FPS).toFixed(1)}f / ${tag}`;
     }
     requestAnimationFrame(tick);
   }
 
-  appearEl.addEventListener('model-loaded', (e) => prepare('appear', e.detail.model));
-  loopEl.addEventListener('model-loaded', (e) => prepare('loop', e.detail.model));
-  appearEl.addEventListener('model-error', (e) => console.error('[appear] model-error:', e.detail));
-  loopEl.addEventListener('model-error', (e) => console.error('[loop] model-error:', e.detail));
+  appearEl.addEventListener('model-loaded', e => {
+    try { prepareAppear(e.detail.model); }
+    catch (err) { console.error('[appear] prepare error:', err); infoEl.textContent = 'appear準備エラー。コンソールを確認してください。'; }
+  });
+  loopEl.addEventListener('model-loaded', e => {
+    try { prepareLoop(e.detail.model); }
+    catch (err) { console.error('[loop] prepare error:', err); infoEl.textContent = 'loop準備エラー。コンソールを確認してください。'; }
+  });
+  appearEl.addEventListener('model-error', e => {
+    console.error('[appear] model-error:', e.detail);
+    infoEl.textContent = 'appearの読み込みに失敗しました。GLBのファイル名と配置を確認してください。';
+  });
+  loopEl.addEventListener('model-error', e => {
+    console.error('[loop] model-error:', e.detail);
+    infoEl.textContent = 'loopの読み込みに失敗しました。GLBのファイル名と配置を確認してください。';
+  });
+})();
 </script>
 </body>
 </html>
