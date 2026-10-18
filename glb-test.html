@@ -57,6 +57,15 @@
   let loopEnd = LOOP_END_F / FPS;      // 秒(モデルの実長より長ければ後で切り詰める)
   let startMs = null;
   let ready = false;
+  let actions = [];   // { a: AnimationAction, d: クリップ長(秒) }
+
+  // 再生位置を直接指定する。クリップごとに最終キーで止める(それ以降は最後の値を保つ)。
+  // ※ LoopOnce+clampWhenFinished は使わない: 終了したactionが「一時停止」状態になり、
+  //   その後 setTime しても 0f の姿勢に固定されてしまう(モデルが消える原因になる)
+  function seek(t) {
+    actions.forEach(({ a, d }) => { a.time = Math.min(t, d - 0.0001); });
+    mixer.update(0);
+  }
 
   // 経過秒 → 再生位置(秒)。前半は1回だけ、ループ開始以降は [loopStart, loopEnd) を繰り返す
   function timeAt(elapsed) {
@@ -77,7 +86,7 @@
   // 診断: ループ開始時と終了時で、位置・回転・スケールがどれだけ違うかを調べる
   // (大きな差があると、ループの折り返しで「パッと飛ぶ」ように見える)
   function snapshot(model, t) {
-    mixer.setTime(t);
+    seek(t);
     model.updateMatrixWorld(true);
     const snap = new Map();
     model.traverse((o) => {
@@ -103,11 +112,13 @@
     } else {
       console.warn(`[SEAM] ${LOOP_START_F}f と ${(loopEnd * FPS).toFixed(0)}f で姿勢が違うオブジェクト(ループの継ぎ目で飛ぶ原因):\n` + rows.join('\n'));
     }
-    mixer.setTime(0);
+    seek(0);
   }
 
   function prepare(model) {
     // ── 材質の調整(元のalphaを保ち、透過表現(transmission)だけ無効化) ──
+    // 1018版と同じ: alpha が実質0のメッシュは非表示にする
+    let hiddenByAlpha = 0;
     model.traverse((node) => {
       if (!node.isMesh || !node.material) return;
       const mats = Array.isArray(node.material) ? node.material : [node.material];
@@ -116,21 +127,21 @@
         if (MAT_MODE === '2') mat.depthWrite = true;
         if (MAT_MODE === '3') { mat.transparent = false; mat.opacity = 1; mat.depthWrite = true; }
         mat.needsUpdate = true;
+        if (MAT_MODE !== '3' && mat.opacity <= 0.001) { node.visible = false; hiddenByAlpha++; }
       });
     });
+    console.log(`[model] alpha=0で非表示にしたマテリアル数: ${hiddenByAlpha}`);
 
     const clips = model.animations || [];
     if (clips.length === 0) { infoEl.textContent = 'アニメーションが見つかりません'; return; }
 
     // 全クリップを同じミキサーで再生(別オブジェクトを動かすクリップが複数あっても同時に進む)。
-    // 1回再生にして最後の値で止める: これを入れないと、短いクリップ(例: 0〜28f)が
-    // ループ区間で巻き戻って最初から再生されてしまう
+    // 時刻は seek() が毎フレーム直接指定する(短いクリップは最終キーで止まる)
     mixer = new THREE.AnimationMixer(model);
-    clips.forEach((clip) => {
-      const action = mixer.clipAction(clip);
-      action.setLoop(THREE.LoopOnce, 1);
-      action.clampWhenFinished = true;
-      action.play();
+    actions = clips.map((clip) => {
+      const a = mixer.clipAction(clip);
+      a.play();
+      return { a, d: clip.duration };
     });
 
     const [lo, hi] = overallRange(clips);
@@ -161,7 +172,7 @@
     if (startMs === null) startMs = nowMs;
     const elapsed = (nowMs - startMs) / 1000;
     const t = timeAt(elapsed);
-    mixer.setTime(t);
+    seek(t);
 
     const tag = `loop=${LOOP_START_F}〜${(loopEnd * FPS).toFixed(0)}f ry=${RY} mat=${MAT_MODE}`;
     const label = elapsed < loopStart ? '1回再生中' : 'ループ再生中';
