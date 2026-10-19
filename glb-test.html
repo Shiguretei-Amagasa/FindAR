@@ -87,6 +87,11 @@
   // 再生位置を直接指定する。クリップごとに最終キーで止める(それ以降は最後の値を保つ)。
   // ※ LoopOnce+clampWhenFinished は使わない: 終了したactionが「一時停止」状態になり、
   //   その後 setTime しても 0f の姿勢に固定されてしまう(モデルが消える原因になる)
+  function chainVisible(o) {
+    for (; o; o = o.parent) if (!o.visible) return false;
+    return true;
+  }
+
   function seek(t) {
     actions.forEach(({ a, d }) => { a.time = Math.min(t, d - 0.0001); });
     groups.forEach((g) => {
@@ -157,7 +162,12 @@
         if (MAT_MODE === '2') mat.depthWrite = true;
         if (MAT_MODE === '3') { mat.transparent = false; mat.opacity = 1; mat.depthWrite = true; }
         mat.needsUpdate = true;
-        if (MAT_MODE !== '3' && mat.opacity <= 0.001) { node.visible = false; hiddenByAlpha++; }
+        if (MAT_MODE !== '3' && mat.opacity <= 0.001) {
+          // node.visible=false にすると、子ノード(Target_All の cell 破片244個)まで描画されなくなる。
+          // そのため、このメッシュ自身だけを隠す(マテリアルを不可視にする)
+          mat.visible = false; hiddenByAlpha++;
+          console.log(`[alpha=0] このメッシュだけ非表示: ${node.name} (子ノード数 ${node.children.length})`);
+        }
       });
     });
     console.log(`[model] alpha=0で非表示にしたマテリアル数: ${hiddenByAlpha}`);
@@ -216,11 +226,11 @@
         if (!o.isMesh) return;
         total++;
         const e = o.matrixWorld.elements;
-        if (o.visible && Math.hypot(e[0], e[1], e[2]) > 0.001) vis++;
+        if (chainVisible(o) && o.material && (Array.isArray(o.material) ? o.material[0].visible : o.material.visible) && Math.hypot(e[0], e[1], e[2]) > 0.001) vis++;
       });
       const box = new THREE.Box3();
       modelRef.traverse((o) => {
-        if (o.isMesh && o.visible) {
+        if (o.isMesh && chainVisible(o)) {
           const e = o.matrixWorld.elements;
           if (Math.hypot(e[0], e[1], e[2]) > 0.001) box.expandByObject(o);
         }
