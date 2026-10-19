@@ -15,6 +15,7 @@
 <div id="status" style="position:fixed; top:8px; left:8px; right:8px; z-index:600; color:#fff; background:rgba(0,0,0,0.5); padding:6px 10px; font-family:sans-serif; font-size:13px; border-radius:6px;">
   読み込み中...
 </div>
+<div id="debug-display" style="position:fixed; bottom:44px; left:8px; right:8px; z-index:600; text-align:center; color:#fff; background:rgba(0,0,0,0.5); padding:4px 8px; font-family:sans-serif; font-size:12px; border-radius:6px;"></div>
 <div id="distance-display" style="position:fixed; bottom:16px; left:0; right:0; z-index:600; text-align:center; color:#fff; font-size:16px; font-weight:bold; text-shadow:0 1px 4px #000;"></div>
 
 <!-- 動作確認済みの基準版(位置情報成功test.html)の構成のまま。
@@ -61,6 +62,7 @@ const firebaseConfig = {
 //   ?ry=90       Y軸まわりの回転角(度)
 //   ?emi=0.55    発光倍率(1だと白飛びする)
 //   ?loop=30 ?end=90 ?fps=24   anim=1 のときのループ区間(終了はモデルの最終キー88fに切り詰め)
+//   ?box=1       GLBと同じ座標に、基準版と同じ赤い箱も出す(「配置できていない」のか「GLBが見えない」のかの切り分け用)
 //   ?src=...     GLBのパス(既定 ./FindAR_v8.glb)
 // ════════════════════════════════════════════════
 const params = new URLSearchParams(location.search);
@@ -75,6 +77,7 @@ const FPS = num('fps', 24);
 const LOOP_START_F = num('loop', 30);
 const LOOP_END_F = num('end', 90);
 const SRC = params.get('src') || './FindAR_v8.glb';
+const SHOW_BOX = params.get('box') === '1';
 
 const statusEl = document.getElementById('status');
 const cameraEl = document.querySelector('[gps-new-camera]');
@@ -135,6 +138,15 @@ function tryPlace() {
     statusEl.textContent += ' / GLBの読み込みに失敗(ファイル名・場所を確認)';
   });
   sceneEl.appendChild(holo);
+  if (SHOW_BOX) {   // 基準版と同じ赤い箱(切り分け用)
+    const box = document.createElement('a-box');
+    box.setAttribute('color', 'red');
+    box.setAttribute('scale', '10 10 10');
+    box.setAttribute('material', 'side: double');
+    box.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lng};`);
+    sceneEl.appendChild(box);
+    console.log('[AR] 赤い箱も配置(?box=1)');
+  }
   console.log('[AR] GLB entity placed', lat, lng, SRC);
   statusEl.textContent += ' / GLBを配置しました(読み込み中)';
 }
@@ -221,6 +233,24 @@ function tick(nowMs) {
   seek(timeAt((nowMs - clock0) / 1000));
   requestAnimationFrame(tick);
 }
+
+// 方位の確認(読み取り専用): スマホを回したときに「向き」が変わるか、対象がどちら側にあるかを表示する
+setInterval(() => {
+  const el = document.getElementById('debug-display');
+  const cam = cameraEl.getObject3D('camera');
+  if (!lastFix || !cam) return;
+  const tgt = target || (placed ? { lat: lastFix.lat + 0.0001, lng: lastFix.lng } : null);
+  if (!tgt) return;
+  const M = 111195;
+  const dN = (tgt.lat - lastFix.lat) * M;
+  const dE = (tgt.lng - lastFix.lng) * M * Math.cos(lastFix.lat * Math.PI / 180);
+  const bearing = (Math.atan2(dE, dN) * 180 / Math.PI + 360) % 360;      // 対象の方角(北から時計回り)
+  const dir = new THREE.Vector3();
+  cam.getWorldDirection(dir);
+  const heading = (Math.atan2(dir.x, -dir.z) * 180 / Math.PI + 360) % 360; // カメラの向き(北から時計回り)
+  const diff = ((bearing - heading + 540) % 360) - 180;                   // +なら対象は右側
+  el.textContent = `距離${Math.hypot(dN, dE).toFixed(1)}m / 対象の方角${bearing.toFixed(0)}° / カメラの向き${heading.toFixed(0)}° / 差${diff > 0 ? '+' : ''}${diff.toFixed(0)}°(+は右)`;
+}, 300);
 
 // 距離表示(読み取り専用。描画には一切干渉しない)
 setInterval(() => {
