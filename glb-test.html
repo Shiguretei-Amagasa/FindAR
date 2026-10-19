@@ -13,7 +13,7 @@
   #panel .row { display:flex; align-items:center; gap:6px; margin:3px 0; }
   #panel button, #panel select { font-size:12px; padding:4px 8px; }
   #panel input[type=range] { flex:1; min-width:0; }
-  #panel .lbl { width:4.5em; flex:none; }
+  #panel .lbl { width:5.5em; flex:none; }
   #panel .val { width:3.2em; text-align:right; flex:none; }
 </style>
 </head>
@@ -30,6 +30,14 @@
     <select id="selMode">
       <option value="full">通し再生(0〜終了を繰り返す)</option>
       <option value="split">分割(前半1回→後半ループ)</option>
+    </select>
+  </div>
+  <div class="row">
+    <span class="lbl">重複クリップ</span>
+    <select id="selOverlap">
+      <option value="latest">後のクリップのみ(球Action.003だけ)</option>
+      <option value="switch">開始時刻で切替(30fで入替)</option>
+      <option value="blend">混ぜる(従来)</option>
     </select>
   </div>
   <div class="row"><span class="lbl">フレーム</span><input id="seekBar" type="range" min="0" max="88" step="0.1" value="0"><span class="val" id="seekVal">0</span></div>
@@ -57,7 +65,7 @@
   //   ?fps=24      GLBのフレームレート
   //   ?ry=90       Y軸まわりの回転角(度)。向きが逆なら -90
   //   ?mat=1       1(既定): 透過表現(transmission)だけ無効化 / 2: 1+深度書き込み / 3: 診断用の全不透明化
-  //   ?overlap=switch  switch(既定): 同じ部品を動かすクリップは「後から始まる方」に切り替え / blend: 全部混ぜる(従来)
+  //   ?overlap=latest  同じ部品を動かすクリップが複数ある場合: latest(既定)=最後に始まるクリップだけ使う / switch=後のクリップの開始時刻で切替 / blend=全部混ぜる
   //   ?amb=1 ?dir=1 ?emi=1  環境光・平行光・発光倍率の初期値(画面下のスライダーでも変更可)
   //   ?src=...     読み込むGLBのパス
   // ════════════════════════════════════════════════
@@ -69,7 +77,7 @@
   const LOOP_END_F = num('end', 90);
   const RY = num('ry', 90);
   const MAT_MODE = params.get('mat') || '1';
-  const OVERLAP = params.get('overlap') === 'blend' ? 'blend' : 'switch';
+  let overlap = ['switch', 'blend'].includes(params.get('overlap')) ? params.get('overlap') : 'latest';
   const SRC = params.get('src') || './FindAR_v8.glb';
 
   const $ = (id) => document.getElementById(id);
@@ -97,6 +105,7 @@
 
   // ── UI ──
   $('selMode').value = mode;
+  $('selOverlap').value = overlap;
   const bindSlider = (rangeId, valId, init, onChange) => {
     const r = $(rangeId), v = $(valId);
     r.value = init; v.textContent = (+init).toFixed(2);
@@ -117,6 +126,7 @@
   });
   $('btnRestart').addEventListener('click', () => { clock = 0; playing = true; $('btnPlay').textContent = '⏸ 一時停止'; });
   $('selMode').addEventListener('change', (e) => { mode = e.target.value; clock = 0; });
+  $('selOverlap').addEventListener('change', (e) => { overlap = e.target.value; });
   const bar = $('seekBar');
   bar.addEventListener('pointerdown', () => { dragging = true; });
   window.addEventListener('pointerup', () => { dragging = false; });
@@ -141,7 +151,7 @@
     });
     groups = [...byKey.values()].filter((g) => g.length > 1).map((g) => g.sort((a, b) => a.start - b.start));
     groups.forEach((g) => console.log('[重複クリップ] 同じプロパティを動かす組:',
-      g.map((x) => `${x.name}(開始${(x.start * FPS).toFixed(0)}f)`).join(' → '), `/ overlap=${OVERLAP}`));
+      g.map((x) => `${x.name}(開始${(x.start * FPS).toFixed(0)}f)`).join(' → '), `/ overlap=${overlap}`));
     if (groups.length === 0) console.log('[重複クリップ] なし');
   }
 
@@ -179,13 +189,15 @@
   // ※ LoopOnce+clampWhenFinished は使わない: 終了したactionが一時停止状態になり、0fの姿勢に固定されてしまう
   function seek(t) {
     actions.forEach(({ a, d }) => { a.time = Math.min(t, d - 0.0001); });
-    if (OVERLAP === 'switch') {
-      groups.forEach((g) => {
-        let active = g[0];
+    groups.forEach((g) => {
+      let active = null;                                   // blend のときは全部有効(重み1)
+      if (overlap === 'latest') active = g[g.length - 1];  // 最後に始まるクリップだけ
+      if (overlap === 'switch') {                          // その時刻までに開始した最後のクリップ
+        active = g[0];
         g.forEach((x) => { if (x.start <= t + 0.0001) active = x; });
-        g.forEach((x) => x.a.setEffectiveWeight(x === active ? 1 : 0));
-      });
-    }
+      }
+      g.forEach((x) => x.a.setEffectiveWeight(active === null || x === active ? 1 : 0));
+    });
     mixer.update(0);
   }
 
@@ -319,7 +331,7 @@
         `見えているメッシュ: ${vis} / ${total} / 中心(${c.x.toFixed(1)}, ${c.y.toFixed(1)}, ${c.z.toFixed(1)}) 大きさ(${z.x.toFixed(1)}, ${z.y.toFixed(1)}, ${z.z.toFixed(1)})`;
     }
     const label = mode === 'full' ? '通し再生' : (clock < loopStart ? '1回再生中' : 'ループ再生中');
-    infoEl.innerHTML = `${label}${playing ? '' : '(停止中)'} / ${(t * FPS).toFixed(1)}f / mat=${MAT_MODE} overlap=${OVERLAP}<br>${diag}`;
+    infoEl.innerHTML = `${label}${playing ? '' : '(停止中)'} / ${(t * FPS).toFixed(1)}f / mat=${MAT_MODE} overlap=${overlap}<br>${diag}`;
     requestAnimationFrame(tick);
   }
 
