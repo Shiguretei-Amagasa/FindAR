@@ -66,7 +66,7 @@
   //   ?ry=90       Y軸まわりの回転角(度)。向きが逆なら -90
   //   ?mat=1       1(既定): 透過表現(transmission)だけ無効化 / 2: 1+深度書き込み / 3: 診断用の全不透明化
   //   ?overlap=latest  同じ部品を動かすクリップが複数ある場合: latest(既定)=最後に始まるクリップだけ使う / switch=後のクリップの開始時刻で切替 / blend=全部混ぜる
-  //   ?amb=1 ?dir=1 ?emi=1  環境光・平行光・発光倍率の初期値(画面下のスライダーでも変更可)
+  //   ?amb=1 ?dir=1 ?emi=0.55  環境光・平行光・発光倍率の初期値(画面下のスライダーでも変更可)
   //   ?src=...     読み込むGLBのパス
   // ════════════════════════════════════════════════
   const params = new URLSearchParams(location.search);
@@ -113,7 +113,7 @@
   };
   const setLight = (id, k) => $(id).setAttribute('light', 'intensity', k);
   const setEmissive = (k) => allMats.forEach((m) => { m.emissiveIntensity = (m.userData.baseEmi ?? 1) * k; });
-  const EMI0 = num('emi', 1);
+  const EMI0 = num('emi', 0.55);
   bindSlider('rAmb', 'vAmb', num('amb', 1), (k) => setLight('ambient', k));
   bindSlider('rDir', 'vDir', num('dir', 1), (k) => setLight('directional', k));
   bindSlider('rEmi', 'vEmi', EMI0, setEmissive);
@@ -126,7 +126,7 @@
   });
   $('btnRestart').addEventListener('click', () => { clock = 0; playing = true; $('btnPlay').textContent = '⏸ 一時停止'; });
   $('selMode').addEventListener('change', (e) => { mode = e.target.value; clock = 0; });
-  $('selOverlap').addEventListener('change', (e) => { overlap = e.target.value; });
+  $('selOverlap').addEventListener('change', (e) => { overlap = e.target.value; if (ready) { console.log(`[overlap] ${overlap} に変更`); diagnoseSeam(modelRef); } });
   const bar = $('seekBar');
   bar.addEventListener('pointerdown', () => { dragging = true; });
   window.addEventListener('pointerup', () => { dragging = false; });
@@ -153,6 +153,19 @@
     groups.forEach((g) => console.log('[重複クリップ] 同じプロパティを動かす組:',
       g.map((x) => `${x.name}(開始${(x.start * FPS).toFixed(0)}f)`).join(' → '), `/ overlap=${overlap}`));
     if (groups.length === 0) console.log('[重複クリップ] なし');
+  }
+
+  // 診断: 重複クリップの全キー(フレームと値)をログに出す。動きの中身を確認するためのもの
+  function dumpKeys() {
+    groups.forEach((g) => g.forEach((x) => x.clip.tracks.forEach((tr) => {
+      const n = tr.getValueSize();
+      const rows = [];
+      for (let i = 0; i < tr.times.length; i++) {
+        const v = Array.from(tr.values.slice(i * n, i * n + n)).map((q) => q.toFixed(2)).join(',');
+        rows.push(`${(tr.times[i] * FPS).toFixed(1)}f:(${v})`);
+      }
+      console.log(`[keys] ${x.name} / ${tr.name}\n` + rows.join('\n'));
+    })));
   }
 
   // 診断: 重複クリップの切り替え時刻で、前のクリップと次のクリップの姿勢がどれだけ違うか
@@ -236,8 +249,8 @@
       const dp = va.p.distanceTo(vb.p), dq = 1 - Math.abs(va.q.dot(vb.q)), ds = va.s.distanceTo(vb.s);
       if (dp > 0.001 || dq > 0.0001 || ds > 0.001) rows.push(`${obj.name || obj.type}: 位置差=${dp.toFixed(4)} 回転差=${dq.toFixed(5)} スケール差=${ds.toFixed(4)}`);
     });
-    if (rows.length === 0) console.log(`[SEAM] ${LOOP_START_F}f と ${(loopEnd * FPS).toFixed(0)}f の姿勢は一致`);
-    else console.warn(`[SEAM] ${LOOP_START_F}f と ${(loopEnd * FPS).toFixed(0)}f で姿勢が違うオブジェクト:\n` + rows.join('\n'));
+    if (rows.length === 0) console.log(`[SEAM] (overlap=${overlap}) ${LOOP_START_F}f と ${(loopEnd * FPS).toFixed(0)}f の姿勢は一致`);
+    else console.warn(`[SEAM] (overlap=${overlap}) ${LOOP_START_F}f と ${(loopEnd * FPS).toFixed(0)}f で姿勢が違うオブジェクト:\n` + rows.join('\n'));
     seek(0);
   }
 
@@ -297,6 +310,7 @@
 
     console.log(`[loop] 全体 ${(lo * FPS).toFixed(0)}〜${(hi * FPS).toFixed(0)}f / ループ ${LOOP_START_F}〜${(loopEnd * FPS).toFixed(0)}f / fps=${FPS} / mode=${mode}`);
     diagnoseSwitch();
+    dumpKeys();
     diagnoseSeam(model);
 
     ready = true;
