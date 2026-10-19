@@ -57,13 +57,43 @@
   let loopEnd = LOOP_END_F / FPS;      // 秒(モデルの実長より長ければ後で切り詰める)
   let startMs = null;
   let ready = false;
-  let actions = [];   // { a: AnimationAction, d: クリップ長(秒) }
+  let actions = [];   // { a: AnimationAction, d: クリップ長(秒), name, start(秒) }
+  let groups = [];    // 同じノード・同じプロパティを動かしてしまう「重複クリップ」の組(開始が早い順)
+  let modelRef = null;
+  let frameNo = 0;
+  let diag = '';
+
+  // 重複クリップの扱い: three.js は同じプロパティに複数クリップが当たると 50:50 で「平均」してしまう。
+  // それを避けるため、各組では「その時刻までに開始した最後のクリップ」だけを有効(重み1)にし、他は重み0にする。
+  // 例) 球Action(1〜59f) と 球Action.003(30〜88f) → 30f未満は球Action、30f以降は球Action.003のみ
+  function buildGroups(clips) {
+    const byKey = new Map();
+    actions.forEach((x, i) => {
+      const clip = clips[i];
+      let start = Infinity;
+      clip.tracks.forEach((tr) => { start = Math.min(start, tr.times[0]); });
+      x.start = start;
+      x.name = clip.name;
+      const key = clip.tracks.map((tr) => tr.name).sort().join('|');
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key).push(x);
+    });
+    groups = [...byKey.values()].filter((g) => g.length > 1).map((g) => g.sort((a, b) => a.start - b.start));
+    groups.forEach((g) => console.log('[重複クリップ] 同じプロパティを動かす組:',
+      g.map((x) => `${x.name}(開始${(x.start * FPS).toFixed(0)}f)`).join(' → '), '… 開始の遅いものが始まったら切り替え'));
+    if (groups.length === 0) console.log('[重複クリップ] なし');
+  }
 
   // 再生位置を直接指定する。クリップごとに最終キーで止める(それ以降は最後の値を保つ)。
   // ※ LoopOnce+clampWhenFinished は使わない: 終了したactionが「一時停止」状態になり、
   //   その後 setTime しても 0f の姿勢に固定されてしまう(モデルが消える原因になる)
   function seek(t) {
     actions.forEach(({ a, d }) => { a.time = Math.min(t, d - 0.0001); });
+    groups.forEach((g) => {
+      let active = g[0];
+      g.forEach((x) => { if (x.start <= t + 0.0001) active = x; });
+      g.forEach((x) => x.a.setEffectiveWeight(x === active ? 1 : 0));
+    });
     mixer.update(0);
   }
 
@@ -143,6 +173,8 @@
       a.play();
       return { a, d: clip.duration };
     });
+    modelRef = model;
+    buildGroups(clips);
 
     const [lo, hi] = overallRange(clips);
     if (loopEnd > hi + 0.0001) {
@@ -176,7 +208,28 @@
 
     const tag = `loop=${LOOP_START_F}〜${(loopEnd * FPS).toFixed(0)}f ry=${RY} mat=${MAT_MODE}`;
     const label = elapsed < loopStart ? '1回再生中' : 'ループ再生中';
-    infoEl.innerHTML = `${label} / ${(t * FPS).toFixed(1)}f / ${tag}<br><small>画面タップで最初から</small>`;
+    // 診断: いま見えているメッシュ数と全体の大きさ(「何も出ない」のか「画面外」なのかの切り分け用)
+    if (frameNo++ % 10 === 0 && modelRef) {
+      modelRef.updateMatrixWorld(true);
+      let vis = 0, total = 0;
+      modelRef.traverse((o) => {
+        if (!o.isMesh) return;
+        total++;
+        const e = o.matrixWorld.elements;
+        if (o.visible && Math.hypot(e[0], e[1], e[2]) > 0.001) vis++;
+      });
+      const box = new THREE.Box3();
+      modelRef.traverse((o) => {
+        if (o.isMesh && o.visible) {
+          const e = o.matrixWorld.elements;
+          if (Math.hypot(e[0], e[1], e[2]) > 0.001) box.expandByObject(o);
+        }
+      });
+      const c = box.getCenter(new THREE.Vector3()), z = box.getSize(new THREE.Vector3());
+      diag = vis === 0 ? `見えているメッシュ: 0 / ${total}` :
+        `見えているメッシュ: ${vis} / ${total}<br>中心(${c.x.toFixed(1)}, ${c.y.toFixed(1)}, ${c.z.toFixed(1)}) 大きさ(${z.x.toFixed(1)}, ${z.y.toFixed(1)}, ${z.z.toFixed(1)})`;
+    }
+    infoEl.innerHTML = `${label} / ${(t * FPS).toFixed(1)}f / ${tag}<br>${diag}<br><small>画面タップで最初から</small>`;
     requestAnimationFrame(tick);
   }
 
