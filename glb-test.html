@@ -3,10 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GLB単体表示テスト(FindAR_v8: 1回再生 → ループ)</title>
+<title>GLB単体表示テスト(FindAR_v8: 通し再生 / 分割再生)</title>
 <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
 <script>eruda.init();</script>
 <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+<style>
+  #panel { position:fixed; left:8px; right:8px; bottom:8px; z-index:600; color:#fff; background:rgba(0,0,0,0.65);
+           padding:8px 10px; font-family:sans-serif; font-size:12px; border-radius:8px; line-height:1.4; touch-action:manipulation; }
+  #panel .row { display:flex; align-items:center; gap:6px; margin:3px 0; }
+  #panel button, #panel select { font-size:12px; padding:4px 8px; }
+  #panel input[type=range] { flex:1; min-width:0; }
+  #panel .lbl { width:4.5em; flex:none; }
+  #panel .val { width:3.2em; text-align:right; flex:none; }
+</style>
 </head>
 <body style="margin:0;">
 
@@ -14,11 +23,26 @@
   読み込み中...
 </div>
 
-<a-scene background="color: #222">
-  <a-light type="ambient" color="#ffffff" intensity="1"></a-light>
-  <a-light type="directional" color="#ffffff" intensity="1" position="1 1 1"></a-light>
+<div id="panel">
+  <div class="row">
+    <button id="btnPlay">⏸ 一時停止</button>
+    <button id="btnRestart">⏮ 最初から</button>
+    <select id="selMode">
+      <option value="full">通し再生(0〜終了を繰り返す)</option>
+      <option value="split">分割(前半1回→後半ループ)</option>
+    </select>
+  </div>
+  <div class="row"><span class="lbl">フレーム</span><input id="seekBar" type="range" min="0" max="88" step="0.1" value="0"><span class="val" id="seekVal">0</span></div>
+  <div class="row"><span class="lbl">環境光</span><input id="rAmb" type="range" min="0" max="1.5" step="0.05"><span class="val" id="vAmb"></span></div>
+  <div class="row"><span class="lbl">平行光</span><input id="rDir" type="range" min="0" max="1.5" step="0.05"><span class="val" id="vDir"></span></div>
+  <div class="row"><span class="lbl">発光倍率</span><input id="rEmi" type="range" min="0" max="1.5" step="0.05"><span class="val" id="vEmi"></span></div>
+</div>
 
-  <!-- 1ファイル(0〜90f)。前半は1回だけ、LOOP_START〜LOOP_END をループ再生する -->
+<a-scene background="color: #222">
+  <a-light id="ambient" type="ambient" color="#ffffff" intensity="1"></a-light>
+  <a-light id="directional" type="directional" color="#ffffff" intensity="1" position="1 1 1"></a-light>
+
+  <!-- 1ファイル(0〜88f)。通し再生、または「前半1回 → LOOP_START〜LOOP_END をループ」で再生する -->
   <a-entity id="holo" gltf-model="url(./FindAR_v8.glb)" position="0 0 -5"></a-entity>
 
   <a-camera position="0 1.6 0"></a-camera>
@@ -27,14 +51,15 @@
 <script>
   // ════════════════════════════════════════════════
   // 設定(URLパラメータで上書き可能)
-  //   ?loop=30   ループ開始フレーム(既定 30)  ← 後から調整するのはここ
-  //   ?end=90    ループ終了フレーム(既定 90)
-  //   ?fps=24    GLBのフレームレート(既定 24)
-  //   ?ry=90     Y軸まわりの回転角(度)。向きが逆なら -90
-  //   ?mat=1     1(既定): 透過表現(transmission)だけ無効化 / 2: 1+深度書き込み / 3: 診断用の全不透明化
-  //   ?src=...   読み込むGLBのパス(既定 ./FindAR_v8.glb)
-  //   例) ...glb-test-v8.html?loop=28&end=90
-  // 画面をタップすると、最初(0f)から再生し直します。
+  //   ?mode=full   full(既定): 0〜終了を通しで繰り返す確認用 / split: 前半1回→後半ループ
+  //   ?loop=30     ループ開始フレーム(splitのとき)
+  //   ?end=90      終了フレーム(モデルの最終キーより長ければ最終キーに切り詰め)
+  //   ?fps=24      GLBのフレームレート
+  //   ?ry=90       Y軸まわりの回転角(度)。向きが逆なら -90
+  //   ?mat=1       1(既定): 透過表現(transmission)だけ無効化 / 2: 1+深度書き込み / 3: 診断用の全不透明化
+  //   ?overlap=switch  switch(既定): 同じ部品を動かすクリップは「後から始まる方」に切り替え / blend: 全部混ぜる(従来)
+  //   ?amb=1 ?dir=1 ?emi=1  環境光・平行光・発光倍率の初期値(画面下のスライダーでも変更可)
+  //   ?src=...     読み込むGLBのパス
   // ════════════════════════════════════════════════
   const params = new URLSearchParams(location.search);
   const num = (key, def) => (params.has(key) ? parseFloat(params.get(key)) : def);
@@ -44,71 +69,135 @@
   const LOOP_END_F = num('end', 90);
   const RY = num('ry', 90);
   const MAT_MODE = params.get('mat') || '1';
+  const OVERLAP = params.get('overlap') === 'blend' ? 'blend' : 'switch';
   const SRC = params.get('src') || './FindAR_v8.glb';
 
-  const infoEl = document.getElementById('info');
-  const holoEl = document.getElementById('holo');
+  const $ = (id) => document.getElementById(id);
+  const infoEl = $('info');
+  const holoEl = $('holo');
 
   holoEl.setAttribute('gltf-model', `url(${SRC})`);
   holoEl.setAttribute('rotation', `0 ${RY} 0`);
 
+  let mode = params.get('mode') === 'split' ? 'split' : 'full';
   let mixer = null;
   let loopStart = LOOP_START_F / FPS;  // 秒
-  let loopEnd = LOOP_END_F / FPS;      // 秒(モデルの実長より長ければ後で切り詰める)
-  let startMs = null;
+  let loopEnd = LOOP_END_F / FPS;      // 秒(通し再生の終了も兼ねる)
   let ready = false;
-  let actions = [];   // { a: AnimationAction, d: クリップ長(秒), name, start(秒) }
-  let groups = [];    // 同じノード・同じプロパティを動かしてしまう「重複クリップ」の組(開始が早い順)
+  let playing = true;
+  let dragging = false;
+  let clock = 0;                       // 再生開始からの経過秒(一時停止中は進まない)
+  let lastMs = null;
+  let actions = [];   // { a, d: クリップ長(秒), name, start(秒), clip }
+  let groups = [];    // 同じノード・同じプロパティを動かす「重複クリップ」の組(開始が早い順)
+  let allMats = [];
   let modelRef = null;
   let frameNo = 0;
   let diag = '';
 
+  // ── UI ──
+  $('selMode').value = mode;
+  const bindSlider = (rangeId, valId, init, onChange) => {
+    const r = $(rangeId), v = $(valId);
+    r.value = init; v.textContent = (+init).toFixed(2);
+    r.addEventListener('input', () => { v.textContent = (+r.value).toFixed(2); onChange(+r.value); });
+  };
+  const setLight = (id, k) => $(id).setAttribute('light', 'intensity', k);
+  const setEmissive = (k) => allMats.forEach((m) => { m.emissiveIntensity = (m.userData.baseEmi ?? 1) * k; });
+  const EMI0 = num('emi', 1);
+  bindSlider('rAmb', 'vAmb', num('amb', 1), (k) => setLight('ambient', k));
+  bindSlider('rDir', 'vDir', num('dir', 1), (k) => setLight('directional', k));
+  bindSlider('rEmi', 'vEmi', EMI0, setEmissive);
+  setLight('ambient', num('amb', 1));
+  setLight('directional', num('dir', 1));
+
+  $('btnPlay').addEventListener('click', () => {
+    playing = !playing;
+    $('btnPlay').textContent = playing ? '⏸ 一時停止' : '▶ 再生';
+  });
+  $('btnRestart').addEventListener('click', () => { clock = 0; playing = true; $('btnPlay').textContent = '⏸ 一時停止'; });
+  $('selMode').addEventListener('change', (e) => { mode = e.target.value; clock = 0; });
+  const bar = $('seekBar');
+  bar.addEventListener('pointerdown', () => { dragging = true; });
+  window.addEventListener('pointerup', () => { dragging = false; });
+  bar.addEventListener('input', () => {
+    playing = false; $('btnPlay').textContent = '▶ 再生';
+    clock = (+bar.value) / FPS;
+  });
+
+  // ── 再生位置 ──
   // 重複クリップの扱い: three.js は同じプロパティに複数クリップが当たると 50:50 で「平均」してしまう。
   // それを避けるため、各組では「その時刻までに開始した最後のクリップ」だけを有効(重み1)にし、他は重み0にする。
-  // 例) 球Action(1〜59f) と 球Action.003(30〜88f) → 30f未満は球Action、30f以降は球Action.003のみ
   function buildGroups(clips) {
     const byKey = new Map();
     actions.forEach((x, i) => {
       const clip = clips[i];
       let start = Infinity;
       clip.tracks.forEach((tr) => { start = Math.min(start, tr.times[0]); });
-      x.start = start;
-      x.name = clip.name;
+      x.start = start; x.name = clip.name; x.clip = clip;
       const key = clip.tracks.map((tr) => tr.name).sort().join('|');
       if (!byKey.has(key)) byKey.set(key, []);
       byKey.get(key).push(x);
     });
     groups = [...byKey.values()].filter((g) => g.length > 1).map((g) => g.sort((a, b) => a.start - b.start));
     groups.forEach((g) => console.log('[重複クリップ] 同じプロパティを動かす組:',
-      g.map((x) => `${x.name}(開始${(x.start * FPS).toFixed(0)}f)`).join(' → '), '… 開始の遅いものが始まったら切り替え'));
+      g.map((x) => `${x.name}(開始${(x.start * FPS).toFixed(0)}f)`).join(' → '), `/ overlap=${OVERLAP}`));
     if (groups.length === 0) console.log('[重複クリップ] なし');
   }
 
-  // 再生位置を直接指定する。クリップごとに最終キーで止める(それ以降は最後の値を保つ)。
-  // ※ LoopOnce+clampWhenFinished は使わない: 終了したactionが「一時停止」状態になり、
-  //   その後 setTime しても 0f の姿勢に固定されてしまう(モデルが消える原因になる)
+  // 診断: 重複クリップの切り替え時刻で、前のクリップと次のクリップの姿勢がどれだけ違うか
+  // (差が大きいと、切り替えの瞬間にパッと飛ぶ = 「タイミングがずれる」ように見える)
+  function diagnoseSwitch() {
+    groups.forEach((g) => {
+      for (let i = 0; i < g.length - 1; i++) {
+        const A = g[i], B = g[i + 1], ts = B.start;
+        A.clip.tracks.forEach((ta) => {
+          const tb = B.clip.tracks.find((x) => x.name === ta.name);
+          if (!tb) return;
+          const va = Array.from(ta.createInterpolant().evaluate(ts));
+          const vb = Array.from(tb.createInterpolant().evaluate(ts));
+          let diff;
+          if (va.length === 4) {
+            const dot = va.reduce((s, x, k) => s + x * vb[k], 0);
+            diff = 1 - Math.abs(dot);
+          } else {
+            diff = Math.max(...va.map((x, k) => Math.abs(x - vb[k])));
+          }
+          console.log(`[切替] ${A.name} → ${B.name} @${(ts * FPS).toFixed(0)}f / ${ta.name}: 差=${diff.toFixed(4)}` +
+            `  (${va.map((x) => x.toFixed(2)).join(',')}) → (${vb.map((x) => x.toFixed(2)).join(',')})`);
+        });
+      }
+    });
+  }
+
   function chainVisible(o) {
     for (; o; o = o.parent) if (!o.visible) return false;
     return true;
   }
 
+  // 再生位置(秒)を直接指定する。クリップごとに最終キーで止める(それ以降は最後の値を保つ)。
+  // ※ LoopOnce+clampWhenFinished は使わない: 終了したactionが一時停止状態になり、0fの姿勢に固定されてしまう
   function seek(t) {
     actions.forEach(({ a, d }) => { a.time = Math.min(t, d - 0.0001); });
-    groups.forEach((g) => {
-      let active = g[0];
-      g.forEach((x) => { if (x.start <= t + 0.0001) active = x; });
-      g.forEach((x) => x.a.setEffectiveWeight(x === active ? 1 : 0));
-    });
+    if (OVERLAP === 'switch') {
+      groups.forEach((g) => {
+        let active = g[0];
+        g.forEach((x) => { if (x.start <= t + 0.0001) active = x; });
+        g.forEach((x) => x.a.setEffectiveWeight(x === active ? 1 : 0));
+      });
+    }
     mixer.update(0);
   }
 
-  // 経過秒 → 再生位置(秒)。前半は1回だけ、ループ開始以降は [loopStart, loopEnd) を繰り返す
-  function timeAt(elapsed) {
-    if (elapsed < loopStart) return elapsed;
-    return loopStart + ((elapsed - loopStart) % (loopEnd - loopStart));
+  // 経過秒 → 再生位置(秒)
+  //   full : 0〜loopEnd を通しで繰り返す(確認用)
+  //   split: loopStart までは1回だけ、それ以降は [loopStart, loopEnd) を繰り返す
+  function timeAt(c) {
+    if (mode === 'full') return c % loopEnd;
+    if (c < loopStart) return c;
+    return loopStart + ((c - loopStart) % (loopEnd - loopStart));
   }
 
-  // 全クリップのキー範囲(秒)
   function overallRange(clips) {
     let lo = Infinity, hi = -Infinity;
     clips.forEach((clip) => clip.tracks.forEach((tr) => {
@@ -118,15 +207,12 @@
     return [lo, hi];
   }
 
-  // 診断: ループ開始時と終了時で、位置・回転・スケールがどれだけ違うかを調べる
-  // (大きな差があると、ループの折り返しで「パッと飛ぶ」ように見える)
+  // 診断: ループ開始時と終了時の姿勢の差
   function snapshot(model, t) {
     seek(t);
     model.updateMatrixWorld(true);
     const snap = new Map();
-    model.traverse((o) => {
-      snap.set(o, { p: o.position.clone(), q: o.quaternion.clone(), s: o.scale.clone() });
-    });
+    model.traverse((o) => { snap.set(o, { p: o.position.clone(), q: o.quaternion.clone(), s: o.scale.clone() }); });
     return snap;
   }
   function diagnoseSeam(model) {
@@ -135,36 +221,29 @@
     const rows = [];
     a.forEach((va, obj) => {
       const vb = b.get(obj);
-      const dp = va.p.distanceTo(vb.p);
-      const dq = 1 - Math.abs(va.q.dot(vb.q));   // 0 なら同じ向き
-      const ds = va.s.distanceTo(vb.s);
-      if (dp > 0.001 || dq > 0.0001 || ds > 0.001) {
-        rows.push(`${obj.name || obj.type}: 位置差=${dp.toFixed(4)} 回転差=${dq.toFixed(5)} スケール差=${ds.toFixed(4)}`);
-      }
+      const dp = va.p.distanceTo(vb.p), dq = 1 - Math.abs(va.q.dot(vb.q)), ds = va.s.distanceTo(vb.s);
+      if (dp > 0.001 || dq > 0.0001 || ds > 0.001) rows.push(`${obj.name || obj.type}: 位置差=${dp.toFixed(4)} 回転差=${dq.toFixed(5)} スケール差=${ds.toFixed(4)}`);
     });
-    if (rows.length === 0) {
-      console.log(`[SEAM] ${LOOP_START_F}f と ${(loopEnd * FPS).toFixed(0)}f の姿勢は一致(位置・回転・スケール)`);
-    } else {
-      console.warn(`[SEAM] ${LOOP_START_F}f と ${(loopEnd * FPS).toFixed(0)}f で姿勢が違うオブジェクト(ループの継ぎ目で飛ぶ原因):\n` + rows.join('\n'));
-    }
+    if (rows.length === 0) console.log(`[SEAM] ${LOOP_START_F}f と ${(loopEnd * FPS).toFixed(0)}f の姿勢は一致`);
+    else console.warn(`[SEAM] ${LOOP_START_F}f と ${(loopEnd * FPS).toFixed(0)}f で姿勢が違うオブジェクト:\n` + rows.join('\n'));
     seek(0);
   }
 
   function prepare(model) {
-    // ── 材質の調整(元のalphaを保ち、透過表現(transmission)だけ無効化) ──
-    // 1018版と同じ: alpha が実質0のメッシュは非表示にする
+    // ── 材質の調整 ──
     let hiddenByAlpha = 0;
     model.traverse((node) => {
       if (!node.isMesh || !node.material) return;
       const mats = Array.isArray(node.material) ? node.material : [node.material];
       mats.forEach((mat) => {
+        allMats.push(mat);
+        mat.userData.baseEmi = mat.emissiveIntensity;
         mat.transmission = 0;
         if (MAT_MODE === '2') mat.depthWrite = true;
         if (MAT_MODE === '3') { mat.transparent = false; mat.opacity = 1; mat.depthWrite = true; }
         mat.needsUpdate = true;
         if (MAT_MODE !== '3' && mat.opacity <= 0.001) {
-          // node.visible=false にすると、子ノード(Target_All の cell 破片244個)まで描画されなくなる。
-          // そのため、このメッシュ自身だけを隠す(マテリアルを不可視にする)
+          // node.visible=false にすると子ノード(cell破片244個)まで描画されなくなるため、このメッシュだけ隠す
           mat.visible = false; hiddenByAlpha++;
           console.log(`[alpha=0] このメッシュだけ非表示: ${node.name} (子ノード数 ${node.children.length})`);
         }
@@ -172,11 +251,18 @@
     });
     console.log(`[model] alpha=0で非表示にしたマテリアル数: ${hiddenByAlpha}`);
 
+    // 色が白く飛ぶ原因の切り分け用: マテリアルの色・発光・不透明度の内訳(多い順)
+    const stat = new Map();
+    allMats.forEach((m) => {
+      const k = `色#${m.color.getHexString()} 発光#${m.emissive.getHexString()}×${(m.userData.baseEmi ?? 1).toFixed(2)} 不透明度${m.opacity.toFixed(2)} 粗さ${(m.roughness ?? 0).toFixed(2)} 金属${(m.metalness ?? 0).toFixed(2)} blend=${m.transparent}`;
+      stat.set(k, (stat.get(k) || 0) + 1);
+    });
+    console.log('[materials] 内訳(個数):\n' + [...stat.entries()].sort((x, y) => y[1] - x[1]).slice(0, 8).map(([k, n]) => `${n}個: ${k}`).join('\n'));
+    setEmissive(EMI0);
+
     const clips = model.animations || [];
     if (clips.length === 0) { infoEl.textContent = 'アニメーションが見つかりません'; return; }
 
-    // 全クリップを同じミキサーで再生(別オブジェクトを動かすクリップが複数あっても同時に進む)。
-    // 時刻は seek() が毎フレーム直接指定する(短いクリップは最終キーで止まる)
     mixer = new THREE.AnimationMixer(model);
     actions = clips.map((clip) => {
       const a = mixer.clipAction(clip);
@@ -195,56 +281,47 @@
       infoEl.textContent = `ループ区間が不正です (${LOOP_START_F}f〜${(loopEnd * FPS).toFixed(1)}f)`;
       return;
     }
+    bar.max = (loopEnd * FPS).toFixed(1);
 
-    console.log('[clips]', clips.map((c) => {
-      let a = Infinity, b = -Infinity;
-      c.tracks.forEach((tr) => { a = Math.min(a, tr.times[0]); b = Math.max(b, tr.times[tr.times.length - 1]); });
-      return `${c.name}(${(a * FPS).toFixed(0)}〜${(b * FPS).toFixed(0)}f)`;
-    }).join(' / '));
-    console.log(`[loop] 全体 ${(lo * FPS).toFixed(0)}〜${(hi * FPS).toFixed(0)}f / ループ ${LOOP_START_F}〜${(loopEnd * FPS).toFixed(0)}f / fps=${FPS}`);
-
+    console.log(`[loop] 全体 ${(lo * FPS).toFixed(0)}〜${(hi * FPS).toFixed(0)}f / ループ ${LOOP_START_F}〜${(loopEnd * FPS).toFixed(0)}f / fps=${FPS} / mode=${mode}`);
+    diagnoseSwitch();
     diagnoseSeam(model);
 
     ready = true;
-    startMs = null;
     requestAnimationFrame(tick);
   }
 
   function tick(nowMs) {
-    if (startMs === null) startMs = nowMs;
-    const elapsed = (nowMs - startMs) / 1000;
-    const t = timeAt(elapsed);
+    if (lastMs === null) lastMs = nowMs;
+    const dt = (nowMs - lastMs) / 1000;
+    lastMs = nowMs;
+    if (playing) clock += Math.min(dt, 0.1);   // タブ切替などの大きな飛びを抑える
+    const t = timeAt(clock);
     seek(t);
 
-    const tag = `loop=${LOOP_START_F}〜${(loopEnd * FPS).toFixed(0)}f ry=${RY} mat=${MAT_MODE}`;
-    const label = elapsed < loopStart ? '1回再生中' : 'ループ再生中';
-    // 診断: いま見えているメッシュ数と全体の大きさ(「何も出ない」のか「画面外」なのかの切り分け用)
+    if (!dragging) bar.value = (t * FPS).toFixed(1);
+    $('seekVal').textContent = (t * FPS).toFixed(0) + 'f';
+
+    // 診断: いま見えているメッシュ数と全体の大きさ
     if (frameNo++ % 10 === 0 && modelRef) {
       modelRef.updateMatrixWorld(true);
       let vis = 0, total = 0;
+      const box = new THREE.Box3();
       modelRef.traverse((o) => {
         if (!o.isMesh) return;
         total++;
         const e = o.matrixWorld.elements;
-        if (chainVisible(o) && o.material && (Array.isArray(o.material) ? o.material[0].visible : o.material.visible) && Math.hypot(e[0], e[1], e[2]) > 0.001) vis++;
-      });
-      const box = new THREE.Box3();
-      modelRef.traverse((o) => {
-        if (o.isMesh && chainVisible(o)) {
-          const e = o.matrixWorld.elements;
-          if (Math.hypot(e[0], e[1], e[2]) > 0.001) box.expandByObject(o);
-        }
+        const m = Array.isArray(o.material) ? o.material[0] : o.material;
+        if (chainVisible(o) && m && m.visible && Math.hypot(e[0], e[1], e[2]) > 0.001) { vis++; box.expandByObject(o); }
       });
       const c = box.getCenter(new THREE.Vector3()), z = box.getSize(new THREE.Vector3());
       diag = vis === 0 ? `見えているメッシュ: 0 / ${total}` :
-        `見えているメッシュ: ${vis} / ${total}<br>中心(${c.x.toFixed(1)}, ${c.y.toFixed(1)}, ${c.z.toFixed(1)}) 大きさ(${z.x.toFixed(1)}, ${z.y.toFixed(1)}, ${z.z.toFixed(1)})`;
+        `見えているメッシュ: ${vis} / ${total} / 中心(${c.x.toFixed(1)}, ${c.y.toFixed(1)}, ${c.z.toFixed(1)}) 大きさ(${z.x.toFixed(1)}, ${z.y.toFixed(1)}, ${z.z.toFixed(1)})`;
     }
-    infoEl.innerHTML = `${label} / ${(t * FPS).toFixed(1)}f / ${tag}<br>${diag}<br><small>画面タップで最初から</small>`;
+    const label = mode === 'full' ? '通し再生' : (clock < loopStart ? '1回再生中' : 'ループ再生中');
+    infoEl.innerHTML = `${label}${playing ? '' : '(停止中)'} / ${(t * FPS).toFixed(1)}f / mat=${MAT_MODE} overlap=${OVERLAP}<br>${diag}`;
     requestAnimationFrame(tick);
   }
-
-  // タップで頭出し
-  document.addEventListener('click', () => { if (ready) startMs = null; });
 
   holoEl.addEventListener('model-loaded', (e) => prepare(e.detail.model));
   holoEl.addEventListener('model-error', (e) => {
