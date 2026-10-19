@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FindAR - 基準版テスト</title>
+<title>FindAR - GLB表示テスト</title>
 <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
 <script>eruda.init();</script>
 <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
@@ -17,16 +17,18 @@
 </div>
 <div id="distance-display" style="position:fixed; bottom:16px; left:0; right:0; z-index:600; text-align:center; color:#fff; font-size:16px; font-weight:bold; text-shadow:0 1px 4px #000;"></div>
 
-<!-- 最初に赤い箱が見えた構成と同じ。カスタムのタップ画面・videoTexture・look-controls関連の追加は一切なし -->
+<!-- 動作確認済みの基準版(位置情報成功test.html)の構成のまま。
+     変更点は「赤い箱 → FindAR_v8.glb」への置き換えと、ライト2つの追加のみ。
+     カスタムのタップ画面・videoTexture・look-controls関連の追加は一切なし -->
 <a-scene
   vr-mode-ui="enabled: false"
   embedded
   arjs="sourceType: webcam; debugUIEnabled: false;"
   renderer="antialias: true; alpha: true;"
 >
-  <a-camera gps-new-camera="gpsMinDistance: 5;"></a-camera>
   <a-light type="ambient" color="#ffffff" intensity="1"></a-light>
   <a-light type="directional" color="#ffffff" intensity="1" position="1 1 1"></a-light>
+  <a-camera gps-new-camera="gpsMinDistance: 5;"></a-camera>
 </a-scene>
 
 <script type="module">
@@ -49,14 +51,40 @@ const firebaseConfig = {
   measurementId: "G-J7H2LC9FFS"
 };
 
+// ════════════════════════════════════════════════
+// 設定(URLパラメータで上書き可能)
+//   ?id=xxxx     モードB: Firestoreの座標に配置 / 付けない: モードA(自分の北約11mに配置)
+//   ?anim=1      1: 出現→ループのアニメーション再生 / 付けない: 静止表示(frameで指定した姿勢)
+//   ?frame=30    静止表示のときのフレーム(既定30 = 立方体が消えて破片のブロックが残った姿勢)
+//   ?scale=1     モデルの拡大率(遠くから見たいときは 2〜3 に)
+//   ?yoff=0      モデルの高さ調整(モデル内の単位。頭上に出すぎるなら負の値、例 -3.5)
+//   ?ry=90       Y軸まわりの回転角(度)
+//   ?emi=0.55    発光倍率(1だと白飛びする)
+//   ?loop=30 ?end=90 ?fps=24   anim=1 のときのループ区間(終了はモデルの最終キー88fに切り詰め)
+//   ?src=...     GLBのパス(既定 ./FindAR_v8.glb)
+// ════════════════════════════════════════════════
+const params = new URLSearchParams(location.search);
+const num = (k, d) => (params.has(k) ? parseFloat(params.get(k)) : d);
+const ANIM = params.get('anim') === '1';
+const STATIC_FRAME = num('frame', 30);
+const SCALE = num('scale', 1);
+const YOFF = num('yoff', 0);
+const RY = num('ry', 90);
+const EMI = num('emi', 0.55);
+const FPS = num('fps', 24);
+const LOOP_START_F = num('loop', 30);
+const LOOP_END_F = num('end', 90);
+const SRC = params.get('src') || './FindAR_v8.glb';
+
 const statusEl = document.getElementById('status');
 const cameraEl = document.querySelector('[gps-new-camera]');
-const meetupId = new URLSearchParams(location.search).get('id');
+const sceneEl = document.querySelector('a-scene');
+const meetupId = params.get('id');
 
 let target = null;   // モードBのみ使用: Firestoreの座標
 let lastFix = null;  // 自分の最新のGPS位置
 let placed = false;
-let box = null;
+let holo = null;
 
 // ── モードB: ?id=xxxx がある場合のみFirestoreから座標を取得(ページ読み込み時に自動実行) ──
 async function loadTarget() {
@@ -80,7 +108,7 @@ async function loadTarget() {
   }
 }
 
-// ── GPS取得イベント(最初に動いた版と同じ仕組み)。ページ読み込み直後から待ち受ける ──
+// ── GPS取得イベント(基準版と同じ仕組み)。ページ読み込み直後から待ち受ける ──
 cameraEl.addEventListener('gps-camera-update-position', (e) => {
   lastFix = { lat: e.detail.position.latitude, lng: e.detail.position.longitude };
   console.log('[GPS] position acquired', lastFix.lat, lastFix.lng);
@@ -95,26 +123,109 @@ function tryPlace() {
   const lng = target ? target.lng : lastFix.lng;
   placed = true;
 
-  box = document.createElement('a-entity');
-  box.setAttribute('gltf-model', 'url(./FindAR_appear.glb)');
-  box.setAttribute('scale', '20 20 20');
-  box.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lng};`);
-  document.querySelector('a-scene').appendChild(box);
-  console.log('[AR] model placed', lat, lng);
+  // 基準版の赤い箱と同じ流れ: 座標が判明してから「一度だけ」生成し、後から座標を書き換えない
+  holo = document.createElement('a-entity');
+  holo.setAttribute('gltf-model', `url(${SRC})`);
+  holo.setAttribute('scale', `${SCALE} ${SCALE} ${SCALE}`);
+  holo.setAttribute('rotation', `0 ${RY} 0`);
+  holo.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lng};`);
+  holo.addEventListener('model-loaded', (e) => setupModel(e.detail.model));
+  holo.addEventListener('model-error', (e) => {
+    console.error('[GLB] model-error', e.detail);
+    statusEl.textContent += ' / GLBの読み込みに失敗(ファイル名・場所を確認)';
+  });
+  sceneEl.appendChild(holo);
+  console.log('[AR] GLB entity placed', lat, lng, SRC);
+  statusEl.textContent += ' / GLBを配置しました(読み込み中)';
+}
 
-  box.addEventListener('model-loaded', () => {
-    console.log('[AR] model-loaded event fired');
+// ════════════════════════════════════════════════
+// GLBの準備と再生(glb-test-v8.html で確認済みの内容)
+// ════════════════════════════════════════════════
+let mixer = null;
+let actions = [];
+let loopStart = LOOP_START_F / FPS;
+let loopEnd = LOOP_END_F / FPS;
+let clock0 = null;
+
+function seek(t) {
+  actions.forEach(({ a, d }) => { a.time = Math.min(t, d - 0.0001); });
+  mixer.update(0);
+}
+
+function timeAt(c) {
+  if (c < loopStart) return c;
+  return loopStart + ((c - loopStart) % (loopEnd - loopStart));
+}
+
+function setupModel(model) {
+  // 材質: 透過表現(transmission)を無効化し、発光を抑える。alpha=0のメッシュは「そのメッシュだけ」隠す
+  // (node.visible=false にすると、子ノードの破片244個まで消えてしまう)
+  let mats = 0, hidden = 0;
+  model.traverse((node) => {
+    if (!node.isMesh || !node.material) return;
+    (Array.isArray(node.material) ? node.material : [node.material]).forEach((mat) => {
+      mats++;
+      mat.transmission = 0;
+      if (mat.emissiveIntensity !== undefined) mat.emissiveIntensity *= EMI;
+      if (mat.opacity <= 0.001) { mat.visible = false; hidden++; }
+      mat.needsUpdate = true;
+    });
   });
-  box.addEventListener('model-error', (e) => {
-    console.error('[AR] model load error', e.detail);
+  model.position.y += YOFF;
+  console.log(`[GLB] 読み込み完了 / マテリアル ${mats} / alpha=0で隠したもの ${hidden} / scale=${SCALE} yoff=${YOFF} ry=${RY} emi=${EMI}`);
+
+  const clips = model.animations || [];
+  if (clips.length === 0) { statusEl.textContent += ' / (アニメーションなし)'; return; }
+
+  mixer = new THREE.AnimationMixer(model);
+  actions = clips.map((clip) => {
+    const a = mixer.clipAction(clip);
+    a.play();
+    let start = Infinity, end = -Infinity;
+    clip.tracks.forEach((tr) => { start = Math.min(start, tr.times[0]); end = Math.max(end, tr.times[tr.times.length - 1]); });
+    return { a, d: clip.duration, clip, start, end };
   });
-  statusEl.textContent += ' / モデルを配置しました';
+
+  // 同じノード・同じプロパティを動かすクリップが複数ある場合(球Action と 球Action.003)は、
+  // 最後に始まるクリップだけを使う。three.jsは重なると50:50で平均してしまうため
+  const byKey = new Map();
+  actions.forEach((x) => {
+    const key = x.clip.tracks.map((tr) => tr.name).sort().join('|');
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(x);
+  });
+  byKey.forEach((g) => {
+    if (g.length < 2) return;
+    g.sort((p, q) => p.start - q.start);
+    g.forEach((x, i) => x.a.setEffectiveWeight(i === g.length - 1 ? 1 : 0));
+    console.log('[GLB] 重複クリップ:', g.map((x) => x.name || x.clip.name).join(' → '), '… 最後のものだけ使用');
+  });
+
+  const hi = Math.max(...actions.map((x) => x.end));
+  if (loopEnd > hi) loopEnd = hi;
+
+  if (!ANIM) {
+    seek(STATIC_FRAME / FPS);
+    statusEl.textContent += ` / 静止表示(${STATIC_FRAME}f)`;
+    console.log(`[GLB] 静止表示 ${STATIC_FRAME}f`);
+  } else {
+    statusEl.textContent += ' / アニメーション再生';
+    console.log(`[GLB] アニメーション再生 / ループ ${LOOP_START_F}〜${(loopEnd * FPS).toFixed(0)}f`);
+    requestAnimationFrame(tick);
+  }
+}
+
+function tick(nowMs) {
+  if (clock0 === null) clock0 = nowMs;
+  seek(timeAt((nowMs - clock0) / 1000));
+  requestAnimationFrame(tick);
 }
 
 // 距離表示(読み取り専用。描画には一切干渉しない)
 setInterval(() => {
-  if (!box || !box.object3D) return;
-  const d = cameraEl.object3D.position.distanceTo(box.object3D.position);
+  if (!holo || !holo.object3D) return;
+  const d = cameraEl.object3D.position.distanceTo(holo.object3D.position);
   document.getElementById('distance-display').textContent = `対象まで: 約${d.toFixed(1)}m`;
 }, 300);
 
