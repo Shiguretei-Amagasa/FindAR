@@ -1,364 +1,367 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FindAR</title>
-
-<script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-<script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
-
-<style>
-  html, body {
-    margin: 0; padding: 0; height: 100%; overflow: hidden;
-    /* 背景色は指定しない：AR.jsのカメラ映像(z-index:-2)をそのまま見せるため */
-    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+<script>
+  // ?debug=1 のときだけ、スマホ用コンソール(eruda)を読み込む
+  if (new URLSearchParams(location.search).get('debug') === '1') {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/eruda';
+    s.onload = () => eruda.init();
+    document.head.appendChild(s);
   }
-  a-scene canvas {
-    background: transparent !important;
-  }
-
-  #start-overlay {
-    position: fixed; inset: 0; z-index: 999;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    background: #05050a; color: #eae6ff; text-align: center; padding: 24px;
-  }
-  .logo {
-    width: min(320px, 80vw);
-    height: auto;
-    margin: 0 auto 20px;
-    display: block;
-  }
-  #start-overlay p { font-size: 13px; opacity: 0.6; margin: 0 0 28px; line-height: 1.6; }
-  #start-button {
-    padding: 14px 36px; border-radius: 999px; border: 1px solid #8f7bffaa;
-    background: #6f5bff22; color: #eae6ff; font-size: 15px; letter-spacing: 0.05em;
-  }
-  #start-button:active { background: #6f5bff44; }
-
-  #status-bar {
-    position: fixed; top: env(safe-area-inset-top, 12px); left: 0; right: 0;
-    z-index: 500; text-align: center; color: #eae6ffcc; font-size: 12px;
-    letter-spacing: 0.05em; pointer-events: none; text-shadow: 0 1px 4px #000;
-  }
-  #distance-display {
-    position: fixed; bottom: env(safe-area-inset-bottom, 16px); left: 0; right: 0;
-    z-index: 500; text-align: center; color: #eae6ffcc; font-size: 14px;
-    font-weight: 600; letter-spacing: 0.05em; pointer-events: none; text-shadow: 0 1px 4px #000;
-  }
-  #debug-log {
-  position: fixed; top: 40px; left: 8px; right: 8px;
-  max-height: 40vh; overflow-y: auto;
-  z-index: 600; background: rgba(0,0,0,0.6); border-radius: 8px;
-  padding: 8px; font-size: 10px; line-height: 1.5; color: #9fffb0;
-  font-family: monospace; white-space: pre-wrap; word-break: break-all;
-  pointer-events: none;
-}
-</style>
+</script>
+<script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+<script src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/three.js/build/ar-threex-location-only.js"></script>
+<script src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/aframe/build/aframe-ar.js"></script>
 </head>
-<body>
+<body style="margin:0; overflow:hidden;">
 
-<div id="start-overlay">
-  <img src="FindAR_logo_w.png" alt="FindAR" class="logo">
-  <p>相手のいる場所にホログラムが表示されます。<br>カメラと位置情報の使用を許可してください。</p>
-  <button id="start-button">ARを開始</button>
+<div id="status" style="position:fixed; top:8px; left:8px; right:8px; z-index:600; color:#fff; background:rgba(0,0,0,0.5); padding:6px 10px; font-family:sans-serif; font-size:13px; border-radius:6px;">
+  読み込み中...
 </div>
+<div id="debug-display" style="display:none; position:fixed; bottom:44px; left:8px; right:8px; z-index:600; text-align:center; color:#fff; background:rgba(0,0,0,0.5); padding:4px 8px; font-family:sans-serif; font-size:12px; border-radius:6px;"></div>
+<div id="distance-display" style="position:fixed; bottom:16px; left:0; right:0; z-index:600; text-align:center; color:#fff; font-size:16px; font-weight:bold; text-shadow:0 1px 4px #000;"></div>
 
-<div id="status-bar"></div>
-<div id="distance-display"></div>
-
-<!-- GPS ARに必要な最小構成。ホログラム用エンティティは実際の座標が判明してから動的に生成する -->
+<!-- test.html で実機確認した内容を、そのまま viewer.html にしたもの。
+     test.html との違いは「eruda・デバッグ表示を ?debug=1 のときだけ出す」点のみ。
+     カスタムのタップ画面・videoTexture・look-controls関連の追加は一切なし -->
 <a-scene
-  id="findar-scene"
   vr-mode-ui="enabled: false"
   embedded
   arjs="sourceType: webcam; debugUIEnabled: false;"
-  renderer="alpha: true; antialias: true; colorManagement: true;"
+  renderer="antialias: true; alpha: true;"
 >
+  <a-light type="ambient" color="#ffffff" intensity="1"></a-light>
+  <a-light type="directional" color="#ffffff" intensity="1" position="1 1 1"></a-light>
   <a-camera gps-new-camera="gpsMinDistance: 5;"></a-camera>
 </a-scene>
 
 <script type="module">
-  // ════════════════════════════════════════════════
-// デバッグ用：console.log/errorの内容を画面上にも表示する
-// (リモートデバッグ環境が無い場合の代替)
-// ════════════════════════════════════════════════
-const debugLogEl_init = () => document.getElementById('debug-log');
-const originalConsoleLog = console.log.bind(console);
-const originalConsoleError = console.error.bind(console);
-
-function appendDebugLine(prefix, args) {
-  const el = debugLogEl_init();
-  if (!el) return;
-  const text = args.map(a => {
-    try { return typeof a === 'object' ? JSON.stringify(a) : String(a); }
-    catch (e) { return String(a); }
-  }).join(' ');
-  const line = document.createElement('div');
-  line.textContent = `${prefix} ${text}`;
-  el.appendChild(line);
-  el.scrollTop = el.scrollHeight;
-}
-
-console.log = (...args) => {
-  originalConsoleLog(...args);
-  appendDebugLine('[LOG]', args);
-};
-console.error = (...args) => {
-  originalConsoleError(...args);
-  appendDebugLine('[ERR]', args);
-};
-console.warn = (...args) => {
-  originalConsoleLog(...args);
-  appendDebugLine('[WARN]', args);
-};
-
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getFirestore, doc, getDoc }
   from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
-import { initializeAppCheck, ReCaptchaV3Provider }
-  from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js';
 
 // ════════════════════════════════════════════════
-// TODO: index.html と同じFirebaseプロジェクトの設定値に置き換えてください
+// TODO: index.htmlと同じFirebaseプロジェクトの値に置き換えてください
+// (?idを付けて開く「モードB」でのみ使用されます)
 // ════════════════════════════════════════════════
 const firebaseConfig = {
-  apiKey: "AIzaSyByb6EuWZ9Iy9QiR0Nw6IWRb8O_JQqpMSc",
-  authDomain: "findar-ae099.firebaseapp.com",
-  databaseURL: "https://findar-ae099-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "findar-ae099",
-  storageBucket: "findar-ae099.firebasestorage.app",
-  messagingSenderId: "1043165089164",
-  appId: "1:1043165089164:web:0db15bfbef3d85d8df1aa9",
-  measurementId: "G-J7H2LC9FFS"
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
 };
 
-const app = initializeApp(firebaseConfig);
-
-// TODO: サイトキー(シークレットキーではない方)に置き換えてください
-const appCheck = initializeAppCheck(app, {
-  provider: new ReCaptchaV3Provider('Y6LeQYFItAAAAAGaVvZx_Txa8M26qytXHou4ZXmqk'),
-  isTokenAutoRefreshEnabled: true
-});
-
-const db = getFirestore(app);
-
 // ════════════════════════════════════════════════
-// URLの ?id=xxxx を使ってFirestoreから送信者の位置情報を取得する
+// 設定(URLパラメータで上書き可能)
+//   ?debug=1     スマホ用コンソール(eruda)と、方位・距離のデバッグ表示を出す
+//   ?id=xxxx     モードB: Firestoreの座標に配置(通常の使い方) / 付けない: モードA(自分の北約11mに配置。動作確認用)
+//   ?anim=0      0: 静止表示(frameで指定した姿勢) / 付けない: 出現→ループのアニメーション再生(既定)
+//   ?frame=30    静止表示(anim=0)のときのフレーム(既定30 = 立方体が消えて破片のブロックが残った姿勢)
+//   ── 大きさと高さ(距離に応じて自動調整) ──
+//   ?base=4      距離10mでのモデルの実寸の幅(m)。遠いほど (距離/10)^alpha 倍に大きくなる
+//   ?alpha=0.6   遠くをどれだけ大きくするか。0=実寸のまま(遠いと小さく見える) / 1=見かけの大きさが一定(近づいても大きくならない)
+//   ?fit=0.6     近くで大きくなりすぎないための上限。画面の横幅(縦持ち)に対するモデルの幅の割合
+//   ?smin=0.15   拡大率の下限
+//   ?smax=30     拡大率の上限
+//   ?h=2         地上からの高さ(m)。モデルの中心がこの高さに来る
+//   ?anchor=bottom  h をモデルの「下端」の高さにする(既定は中心)
+//   ?eye=1.6     スマホを持つ目の高さ(m)。地面の位置の推定に使う
+//   ?yoff=0      高さの微調整(m。上に上げるなら正の値)
+//   ?scale=1     base にかける倍率(全体をもう少し大きく/小さくしたいとき)
+//   ?ry=90       Y軸まわりの回転角(度)
+//   ?emi=0.55    発光倍率(1だと白飛びする)
+//   ?loop=30 ?end=90 ?fps=24   anim=1 のときのループ区間(終了はモデルの最終キー88fに切り詰め)
+//   ?box=1       GLBと同じ座標に、基準版と同じ赤い箱も出す(「配置できていない」のか「GLBが見えない」のかの切り分け用)
+//   ?src=...     GLBのパス(既定 ./FindAR_v8.glb)
 // ════════════════════════════════════════════════
-async function fetchTargetLocationFromFirebase() {
-  const params = new URLSearchParams(location.search);
-  const meetupId = params.get('id');
+const params = new URLSearchParams(location.search);
+const num = (k, d) => (params.has(k) ? parseFloat(params.get(k)) : d);
+const ANIM = params.get('anim') !== '0';   // 既定はアニメーション再生。?anim=0 で静止表示
+const STATIC_FRAME = num('frame', 30);
+const SCALE = num('scale', 1);
+const YOFF = num('yoff', 0);
+const FIT = num('fit', 0.6);
+const BASE = num('base', 4);
+const ALPHA = num('alpha', 0.6);
+const SMIN = num('smin', 0.15);
+const SMAX = num('smax', 30);
+const HEIGHT = num('h', 2);
+const EYE = num('eye', 1.6);
+const ANCHOR = params.get('anchor') === 'bottom' ? 'bottom' : 'center';
+const RY = num('ry', 90);
+const EMI = num('emi', 0.55);
+const FPS = num('fps', 24);
+const LOOP_START_F = num('loop', 30);
+const LOOP_END_F = num('end', 90);
+const SRC = params.get('src') || './FindAR_v8.glb';
+const SHOW_BOX = params.get('box') === '1';
+const DEBUG = params.get('debug') === '1';
+if (DEBUG) document.getElementById('debug-display').style.display = 'block';
+
+const statusEl = document.getElementById('status');
+const cameraEl = document.querySelector('[gps-new-camera]');
+const sceneEl = document.querySelector('a-scene');
+const meetupId = params.get('id');
+
+let target = null;   // モードBのみ使用: Firestoreの座標
+let lastFix = null;  // 自分の最新のGPS位置
+let placed = false;
+let holo = null;
+
+// ── モードB: ?id=xxxx がある場合のみFirestoreから座標を取得(ページ読み込み時に自動実行) ──
+async function loadTarget() {
   if (!meetupId) {
-    return { lat: NaN, lng: NaN };
-  }
-  try {
-    const snap = await getDoc(doc(db, 'meetups', meetupId));
-    if (!snap.exists()) {
-      return { lat: NaN, lng: NaN };
-    }
-    const data = snap.data();
-    return { lat: data.lat, lng: data.lng };
-  } catch (err) {
-    console.error('[FindAR] Firestore取得エラー:', err);
-    return { lat: NaN, lng: NaN };
-  }
-}
-
-// ════════════════════════════════════════════════
-// 出現アニメーション：1回再生 → 完了イベント発火
-// ════════════════════════════════════════════════
-AFRAME.registerComponent('gltf-animation-once', {
-  init: function () {
-    this.mixer = null;
-    this.el.addEventListener('model-loaded', (e) => {
-      const THREE = AFRAME.THREE;
-      const model = e.detail.model;
-      const clips = model.animations;
-      if (!clips || !clips.length) {
-        console.warn('[FindAR] appearアニメーションが見つかりません:', this.el.id);
-        return;
-      }
-      this.mixer = new THREE.AnimationMixer(model);
-      const action = this.mixer.clipAction(clips[0]);
-      action.setLoop(THREE.LoopOnce);
-      action.clampWhenFinished = true;
-      action.play();
-
-      this.mixer.addEventListener('finished', () => {
-        this.el.emit('findar-sequence-finished', null, false);
-      });
-    });
-  },
-  tick: function (t, dt) {
-    if (this.mixer) this.mixer.update(dt / 1000);
-  }
-});
-
-// ════════════════════════════════════════════════
-// ループアニメーション：元クリップの[startFrame, endFrame]区間だけを
-// 0起点に切り出して無限ループ再生する
-// ════════════════════════════════════════════════
-AFRAME.registerComponent('gltf-animation-loop-trimmed', {
-  schema: {
-    startFrame: { type: 'number', default: 28 },
-    endFrame:   { type: 'number', default: 90 },
-    fps:        { type: 'number', default: 24 }
-  },
-  init: function () {
-    this.mixer = null;
-    this.el.addEventListener('model-loaded', (e) => {
-      const THREE = AFRAME.THREE;
-      const model = e.detail.model;
-      const clips = model.animations;
-      if (!clips || !clips.length) {
-        console.warn('[FindAR] loopアニメーションが見つかりません:', this.el.id);
-        return;
-      }
-      const trimmed = THREE.AnimationUtils.subclip(
-        clips[0], 'findar_loop_trimmed',
-        this.data.startFrame, this.data.endFrame, this.data.fps
-      );
-      this.mixer = new THREE.AnimationMixer(model);
-      const action = this.mixer.clipAction(trimmed);
-      action.setLoop(THREE.LoopRepeat, Infinity);
-      action.play();
-    });
-  },
-  tick: function (t, dt) {
-    if (this.mixer) this.mixer.update(dt / 1000);
-  }
-});
-
-// ════════════════════════════════════════════════
-// 距離に応じたスケール調整 + 画面下部への距離表示
-// ════════════════════════════════════════════════
-AFRAME.registerComponent('gps-distance-scale', {
-  schema: {
-    minScale: { type: 'number', default: 0.3 },
-    maxScale: { type: 'number', default: 8 },
-    factor:   { type: 'number', default: 0.08 }
-  },
-  init: function () {
-    this.cameraEl = document.querySelector('a-camera');
-  },
-  tick: function () {
-    if (!this.cameraEl || !this.cameraEl.object3D) return;
-    const distance = this.cameraEl.object3D.position.distanceTo(this.el.object3D.position);
-    let scale = distance * this.data.factor;
-    scale = Math.max(this.data.minScale, Math.min(this.data.maxScale, scale));
-    this.el.object3D.scale.setScalar(scale);
-
-    if (this.el.getAttribute('visible')) {
-      const displayEl = document.getElementById('distance-display');
-      if (displayEl) displayEl.textContent = `対象まで: 約${distance.toFixed(1)}m`;
-    }
-  }
-});
-
-// ════════════════════════════════════════════════
-// エンティティを「正しい座標が判明してから」動的に生成する
-// (0,0などの誤った座標での初期化を避けるための対策)
-// ════════════════════════════════════════════════
-function createFindAREntities(lat, lng) {
-  const sceneEl = document.getElementById('findar-scene');
-
-  const appearEl = document.createElement('a-entity');
-  appearEl.setAttribute('id', 'findar-appear');
-  appearEl.setAttribute('gltf-model', 'url(./FindAR_appear.glb)');
-  appearEl.setAttribute('gltf-animation-once', '');
-  appearEl.setAttribute('gps-distance-scale', '');
-  appearEl.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lng};`);
-  appearEl.setAttribute('visible', 'true');
-
-  const loopEl = document.createElement('a-entity');
-  loopEl.setAttribute('id', 'findar-loop');
-  loopEl.setAttribute('gltf-model', 'url(./FindAR_loop.glb)');
-  loopEl.setAttribute('gltf-animation-loop-trimmed', 'startFrame: 28; endFrame: 90; fps: 24');
-  loopEl.setAttribute('gps-distance-scale', '');
-  loopEl.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lng};`);
-  loopEl.setAttribute('visible', 'false');
-
-  appearEl.addEventListener('model-loaded', () => {
-    console.log('[FindAR] ⑧ appearモデルの読み込み完了');
-  });
-  loopEl.addEventListener('model-loaded', () => {
-    console.log('[FindAR] ⑨ loopモデルの読み込み完了');
-  });
-
-  appearEl.addEventListener('findar-sequence-finished', () => {
-    appearEl.setAttribute('visible', false);
-    loopEl.setAttribute('visible', true);
-  });
-
-  sceneEl.appendChild(appearEl);
-  sceneEl.appendChild(loopEl);
-}
-
-// ════════════════════════════════════════════════
-// 起動フロー：各ステップでログを出し、どこまで進んだか特定できるようにする
-// ════════════════════════════════════════════════
-const startOverlay = document.getElementById('start-overlay');
-const startButton = document.getElementById('start-button');
-const statusBar = document.getElementById('status-bar');
-const sceneEl = document.getElementById('findar-scene');
-
-startButton.addEventListener('click', async () => {
-  console.log('[FindAR] ① ボタンがタップされました');
-  statusBar.textContent = '位置情報を取得中...';
-
-  if (typeof DeviceOrientationEvent !== 'undefined' &&
-      typeof DeviceOrientationEvent.requestPermission === 'function') {
-    try {
-      const permission = await DeviceOrientationEvent.requestPermission();
-      console.log('[FindAR] ② モーションセンサー許可結果:', permission);
-      if (permission !== 'granted') {
-        statusBar.textContent = 'モーションセンサーの許可が必要です';
-        return;
-      }
-    } catch (err) {
-      console.error('[FindAR] ② モーションセンサー許可でエラー:', err);
-    }
-  } else {
-    console.log('[FindAR] ② モーションセンサー許可は不要な端末です');
-  }
-
-  console.log('[FindAR] ③ Firestoreから位置情報を取得します');
-  const target = await fetchTargetLocationFromFirebase();
-  console.log('[FindAR] ④ Firestore取得結果:', target);
-
-  if (isNaN(target.lat) || isNaN(target.lng)) {
-    console.log('[FindAR] ④-1 座標が不正なため中断');
-    statusBar.textContent = '相手の位置情報を取得できませんでした';
+    statusEl.textContent = 'モードA: 自分の位置の北約11mに配置します';
     return;
   }
-
-  console.log('[FindAR] ⑤ カメラの実GPS取得を待ちます:', target.lat, target.lng);
-  statusBar.textContent = 'GPS位置情報を取得中...';
-
-  const cameraEl = document.querySelector('[gps-new-camera]');
-  let entitiesCreated = false;
-
-
-const gpsTimeout = setTimeout(() => {
-  if (!entitiesCreated) {
-    console.log('[FindAR] ⑤-2 15秒経過してもGPSイベントが発火しませんでした');
-    statusBar.textContent = 'GPSを取得できませんでした。屋外で再度お試しください';
+  statusEl.textContent = 'モードB: Firestoreから座標を取得中...';
+  try {
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const snap = await getDoc(doc(db, 'meetups', meetupId));
+    if (!snap.exists()) { statusEl.textContent = '座標が見つかりませんでした(idを確認してください)'; return; }
+    const data = snap.data();
+    target = { lat: data.lat, lng: data.lng };
+    console.log('[FIRESTORE] target fetched', target);
+    statusEl.textContent = `モードB: 対象座標 ${target.lat.toFixed(6)}, ${target.lng.toFixed(6)}`;
+  } catch (err) {
+    console.error('[FIRESTORE] error', err);
+    statusEl.textContent = 'Firestore取得に失敗しました';
   }
-}, 15000);
+}
 
+// ── GPS取得イベント(基準版と同じ仕組み)。ページ読み込み直後から待ち受ける ──
 cameraEl.addEventListener('gps-camera-update-position', (e) => {
-  console.log('[FindAR] ⑤-1 カメラの実GPSを取得:', e.detail.position.latitude, e.detail.position.longitude);
-  if (!entitiesCreated) {
-    entitiesCreated = true;
-    clearTimeout(gpsTimeout);
-    createFindAREntities(target.lat, target.lng);
-    console.log('[FindAR] ⑥ エンティティ生成完了(実GPS取得後)');
-    startOverlay.style.display = 'none';
-    statusBar.textContent = '';
-    console.log('[FindAR] ⑦ オーバーレイを閉じました');
-  }
+  lastFix = { lat: e.detail.position.latitude, lng: e.detail.position.longitude };
+  console.log('[GPS] position acquired', lastFix.lat, lastFix.lng);
+  tryPlace();
 });
+
+function tryPlace() {
+  if (placed || !lastFix) return;
+  if (meetupId && !target) return; // モードB: Firestoreの座標待ち
+
+  const lat = target ? target.lat : lastFix.lat + 0.0001; // モードA: 北へ約11m
+  const lng = target ? target.lng : lastFix.lng;
+  placed = true;
+
+  // 基準版の赤い箱と同じ流れ: 座標が判明してから「一度だけ」生成し、後から座標を書き換えない
+  holo = document.createElement('a-entity');
+  holo.setAttribute('gltf-model', `url(${SRC})`);
+  holo.setAttribute('scale', '1 1 1');      // 実際の拡大率は fitFrame() が距離から毎フレーム決める
+  holo.setAttribute('visible', 'false');    // 最初の計算が済むまで隠す(大きさが一瞬ちらつくのを防ぐ)
+  holo.setAttribute('rotation', `0 ${RY} 0`);
+  holo.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lng};`);
+  holo.addEventListener('model-loaded', (e) => setupModel(e.detail.model));
+  holo.addEventListener('model-error', (e) => {
+    console.error('[GLB] model-error', e.detail);
+    statusEl.textContent += ' / GLBの読み込みに失敗(ファイル名・場所を確認)';
+  });
+  sceneEl.appendChild(holo);
+  if (SHOW_BOX) {   // 基準版と同じ赤い箱(切り分け用)
+    const box = document.createElement('a-box');
+    box.setAttribute('color', 'red');
+    box.setAttribute('scale', '10 10 10');
+    box.setAttribute('material', 'side: double');
+    box.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lng};`);
+    sceneEl.appendChild(box);
+    console.log('[AR] 赤い箱も配置(?box=1)');
+  }
+  console.log('[AR] GLB entity placed', lat, lng, SRC);
+  statusEl.textContent += ' / GLBを配置しました(読み込み中)';
+}
+
+// ════════════════════════════════════════════════
+// GLBの準備と再生(glb-test-v8.html で確認済みの内容)
+// ════════════════════════════════════════════════
+let mixer = null;
+let actions = [];
+let loopStart = LOOP_START_F / FPS;
+let loopEnd = LOOP_END_F / FPS;
+let clock0 = null;
+
+function seek(t) {
+  actions.forEach(({ a, d }) => { a.time = Math.min(t, d - 0.0001); });
+  mixer.update(0);
+}
+
+function timeAt(c) {
+  if (c < loopStart) return c;
+  return loopStart + ((c - loopStart) % (loopEnd - loopStart));
+}
+
+function setupModel(model) {
+  // 材質: 透過表現(transmission)を無効化し、発光を抑える。alpha=0のメッシュは「そのメッシュだけ」隠す
+  // (node.visible=false にすると、子ノードの破片244個まで消えてしまう)
+  let mats = 0, hidden = 0;
+  model.traverse((node) => {
+    if (!node.isMesh || !node.material) return;
+    (Array.isArray(node.material) ? node.material : [node.material]).forEach((mat) => {
+      mats++;
+      mat.transmission = 0;
+      if (mat.emissiveIntensity !== undefined) mat.emissiveIntensity *= EMI;
+      if (mat.opacity <= 0.001) { mat.visible = false; hidden++; }
+      mat.needsUpdate = true;
+    });
+  });
+  console.log(`[GLB] 読み込み完了 / マテリアル ${mats} / alpha=0で隠したもの ${hidden} / ry=${RY} emi=${EMI}`);
+
+  const clips = model.animations || [];
+  if (clips.length === 0) { statusEl.textContent += ' / (アニメーションなし)'; startFit(model); return; }
+
+  mixer = new THREE.AnimationMixer(model);
+  actions = clips.map((clip) => {
+    const a = mixer.clipAction(clip);
+    a.play();
+    let start = Infinity, end = -Infinity;
+    clip.tracks.forEach((tr) => { start = Math.min(start, tr.times[0]); end = Math.max(end, tr.times[tr.times.length - 1]); });
+    return { a, d: clip.duration, clip, start, end };
+  });
+
+  // 同じノード・同じプロパティを動かすクリップが複数ある場合(球Action と 球Action.003)は、
+  // 最後に始まるクリップだけを使う。three.jsは重なると50:50で平均してしまうため
+  const byKey = new Map();
+  actions.forEach((x) => {
+    const key = x.clip.tracks.map((tr) => tr.name).sort().join('|');
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(x);
+  });
+  byKey.forEach((g) => {
+    if (g.length < 2) return;
+    g.sort((p, q) => p.start - q.start);
+    g.forEach((x, i) => x.a.setEffectiveWeight(i === g.length - 1 ? 1 : 0));
+    console.log('[GLB] 重複クリップ:', g.map((x) => x.name || x.clip.name).join(' → '), '… 最後のものだけ使用');
+  });
+
+  const hi = Math.max(...actions.map((x) => x.end));
+  if (loopEnd > hi) loopEnd = hi;
+
+  seek((ANIM ? LOOP_START_F : STATIC_FRAME) / FPS);   // 基準の姿勢でモデルの大きさを測る
+  startFit(model);
+
+  if (!ANIM) {
+    seek(STATIC_FRAME / FPS);
+    statusEl.textContent += ` / 静止表示(${STATIC_FRAME}f)`;
+    console.log(`[GLB] 静止表示 ${STATIC_FRAME}f`);
+  } else {
+    statusEl.textContent += ' / アニメーション再生';
+    console.log(`[GLB] アニメーション再生 / ループ ${LOOP_START_F}〜${(loopEnd * FPS).toFixed(0)}f`);
+    requestAnimationFrame(tick);
+  }
+}
+
+// ════════════════════════════════════════════════
+// 距離に応じた大きさと、地上からの高さ
+//   ・モデルの実寸の幅を W = BASE × (距離/10)^ALPHA にする(遠いほど大きく、近いほど小さい)。
+//     ALPHA が1未満なので、見かけの大きさは「近づくほど大きく」なり、距離感が保たれる。
+//     ただし近くで画面からはみ出さないよう、画面の横幅の FIT 割を上限にする
+//   ・モデルの中心(または下端)が、地面から HEIGHT m の高さに来るように、モデルの位置を決める
+//     地面の高さ = カメラの高さ − EYE
+// ════════════════════════════════════════════════
+let fit = null;       // { W0: 拡大率1のときのモデルの幅, relY: 基準点の高さ(エンティティからの相対) }
+let curS = null;      // 現在の拡大率(なめらかに追従)
+let curFrac = 0;      // 画面の横幅に対する見かけの幅(診断表示用)
+let fitModel = null;
+let fitShown = false;
+
+function startFit(model) {
+  holo.object3D.updateMatrixWorld(true);
+  const box = new THREE.Box3();
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    const m = Array.isArray(o.material) ? o.material[0] : o.material;
+    const e = o.matrixWorld.elements;
+    for (let p = o; p && p !== model.parent; p = p.parent) if (!p.visible) return;   // エンティティ自体(最初は非表示)は除く
+    if (m && m.visible && Math.hypot(e[0], e[1], e[2]) > 0.001) box.expandByObject(o);
+  });
+  const ep = holo.object3D.position;
+  if (box.isEmpty()) {
+    console.warn('[FIT] 見えているメッシュがなく、大きさを測れませんでした。仮の値(幅4・中心3.5)を使います');
+    fit = { W0: 4, relY: 3.5 - ep.y };
+  } else {
+    const sz = box.getSize(new THREE.Vector3());
+    const anchorY = ANCHOR === 'bottom' ? box.min.y : (box.min.y + box.max.y) / 2;
+    fit = { W0: Math.max(sz.x, sz.z), relY: anchorY - ep.y };
+    console.log(`[FIT] 基準サイズ 幅${Math.max(sz.x, sz.z).toFixed(2)} 高さ${sz.y.toFixed(2)} / 基準点(${ANCHOR})のエンティティからの高さ ${fit.relY.toFixed(2)}`);
+  }
+  fitModel = model;
+  requestAnimationFrame(fitFrame);
+}
+
+function fitFrame() {
+  requestAnimationFrame(fitFrame);
+  const cam = cameraEl.getObject3D('camera');
+  if (!fit || !cam || !holo || !holo.object3D) return;
+  const cp = cameraEl.object3D.position;
+  const ep = holo.object3D.position;
+  const d = Math.max(Math.hypot(cp.x - ep.x, cp.z - ep.z), 1);
+  // 画面の横幅(いまの向きの画面)で、距離 d の位置に見える実寸
+  const hFov = 2 * Math.atan(Math.tan(cam.fov * Math.PI / 360) * (cam.aspect || 0.75));
+  const screenW = 2 * d * Math.tan(hFov / 2);
+  const W = Math.min(BASE * SCALE * Math.pow(d / 10, ALPHA), FIT * screenW);   // 世界での幅(m)
+  const target = Math.min(Math.max(W / fit.W0, SMIN), SMAX);
+  curFrac = curS === null ? 0 : (curS * fit.W0) / screenW;                    // 画面の横幅に対する、いまの見かけの幅
+  curS = curS === null ? target : curS + (target - curS) * 0.08;   // GPSのゆらぎで大きさが暴れないよう、なめらかに追従
+  holo.object3D.scale.setScalar(curS);
+  const groundY = cp.y - EYE;
+  fitModel.position.y = (groundY + HEIGHT + YOFF - ep.y) / curS - fit.relY;
+  if (!fitShown) { holo.setAttribute('visible', 'true'); fitShown = true; console.log(`[FIT] 表示開始 / 距離${d.toFixed(1)}m 拡大率${curS.toFixed(2)} カメラY${cp.y.toFixed(2)}`); }
+}
+
+function tick(nowMs) {
+  if (clock0 === null) clock0 = nowMs;
+  seek(timeAt((nowMs - clock0) / 1000));
+  requestAnimationFrame(tick);
+}
+
+// OSのコンパス値(診断用・読み取りのみ): AR.jsが使っているカメラの向きと、OS自身のコンパスの値を比べる
+const ori = { compass: null, beta: null };
+function onOri(e) {
+  const c = (typeof e.webkitCompassHeading === 'number') ? e.webkitCompassHeading
+          : (e.absolute && e.alpha !== null ? (360 - e.alpha) % 360 : null);
+  if (c !== null) ori.compass = c;
+  if (e.beta !== null) ori.beta = e.beta;
+}
+window.addEventListener('deviceorientation', onOri);
+window.addEventListener('deviceorientationabsolute', onOri);
+
+// 方位の確認(読み取り専用): スマホを回したときに「向き」が変わるか、対象がどちら側にあるかを表示する
+setInterval(() => {
+  if (!DEBUG) return;
+  const el = document.getElementById('debug-display');
+  const cam = cameraEl.getObject3D('camera');
+  if (!lastFix || !cam) return;
+  const tgt = target || (placed ? { lat: lastFix.lat + 0.0001, lng: lastFix.lng } : null);
+  if (!tgt) return;
+  const M = 111195;
+  const dN = (tgt.lat - lastFix.lat) * M;
+  const dE = (tgt.lng - lastFix.lng) * M * Math.cos(lastFix.lat * Math.PI / 180);
+  const bearing = (Math.atan2(dE, dN) * 180 / Math.PI + 360) % 360;      // 対象の方角(北から時計回り)
+  const dir = new THREE.Vector3();
+  cam.getWorldDirection(dir);
+  const heading = (Math.atan2(dir.x, -dir.z) * 180 / Math.PI + 360) % 360; // カメラの向き(北から時計回り)
+  const diff = ((bearing - heading + 540) % 360) - 180;                   // +なら対象は右側
+  const cmp = ori.compass;
+  const gap = cmp === null ? null : ((heading - cmp + 540) % 360) - 180;   // AR.jsの向き − OSコンパス
+  el.innerHTML = `距離${Math.hypot(dN, dE).toFixed(1)}m / 対象の方角${bearing.toFixed(0)}° / カメラの向き${heading.toFixed(0)}° / 差${diff > 0 ? '+' : ''}${diff.toFixed(0)}°(+は右)<br>` +
+    `OSコンパス${cmp === null ? '取得なし' : cmp.toFixed(0) + '°'} / AR.jsとのずれ${gap === null ? '-' : (gap > 0 ? '+' : '') + gap.toFixed(0) + '°'} / 傾き${ori.beta === null ? '-' : ori.beta.toFixed(0) + '°'}` +
+    (curS !== null ? ` / 拡大率${curS.toFixed(1)} 画面幅比${(curFrac * 100).toFixed(0)}% カメラY${cameraEl.object3D.position.y.toFixed(1)}` : '');
+}, 300);
+
+// 距離表示(読み取り専用。描画には一切干渉しない)
+setInterval(() => {
+  if (!holo || !holo.object3D) return;
+  const d = cameraEl.object3D.position.distanceTo(holo.object3D.position);
+  document.getElementById('distance-display').textContent = `対象まで: 約${d.toFixed(1)}m`;
+}, 300);
+
+loadTarget().then(tryPlace);
 </script>
 </body>
 </html>
