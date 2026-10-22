@@ -312,6 +312,17 @@ function tick(nowMs) {
   requestAnimationFrame(tick);
 }
 
+// OSのコンパス値(診断用・読み取りのみ): AR.jsが使っているカメラの向きと、OS自身のコンパスの値を比べる
+const ori = { compass: null, beta: null };
+function onOri(e) {
+  const c = (typeof e.webkitCompassHeading === 'number') ? e.webkitCompassHeading
+          : (e.absolute && e.alpha !== null ? (360 - e.alpha) % 360 : null);
+  if (c !== null) ori.compass = c;
+  if (e.beta !== null) ori.beta = e.beta;
+}
+window.addEventListener('deviceorientation', onOri);
+window.addEventListener('deviceorientationabsolute', onOri);
+
 // 方位の確認(読み取り専用): スマホを回したときに「向き」が変わるか、対象がどちら側にあるかを表示する
 setInterval(() => {
   const el = document.getElementById('debug-display');
@@ -327,7 +338,10 @@ setInterval(() => {
   cam.getWorldDirection(dir);
   const heading = (Math.atan2(dir.x, -dir.z) * 180 / Math.PI + 360) % 360; // カメラの向き(北から時計回り)
   const diff = ((bearing - heading + 540) % 360) - 180;                   // +なら対象は右側
-  el.textContent = `距離${Math.hypot(dN, dE).toFixed(1)}m / 対象の方角${bearing.toFixed(0)}° / カメラの向き${heading.toFixed(0)}° / 差${diff > 0 ? '+' : ''}${diff.toFixed(0)}°(+は右)` +
+  const cmp = ori.compass;
+  const gap = cmp === null ? null : ((heading - cmp + 540) % 360) - 180;   // AR.jsの向き − OSコンパス
+  el.innerHTML = `距離${Math.hypot(dN, dE).toFixed(1)}m / 対象の方角${bearing.toFixed(0)}° / カメラの向き${heading.toFixed(0)}° / 差${diff > 0 ? '+' : ''}${diff.toFixed(0)}°(+は右)<br>` +
+    `OSコンパス${cmp === null ? '取得なし' : cmp.toFixed(0) + '°'} / AR.jsとのずれ${gap === null ? '-' : (gap > 0 ? '+' : '') + gap.toFixed(0) + '°'} / 傾き${ori.beta === null ? '-' : ori.beta.toFixed(0) + '°'}` +
     (curS !== null ? ` / 拡大率${curS.toFixed(1)} 画面幅比${(curFrac * 100).toFixed(0)}% カメラY${cameraEl.object3D.position.y.toFixed(1)}` : '');
 }, 300);
 
