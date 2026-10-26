@@ -376,8 +376,9 @@ window.addEventListener('deviceorientationabsolute', onOri);
 
 // GPSの精度(診断用・読み取りのみ): 現在地の誤差の目安(m)
 let gpsAcc = null;
+let gpsRaw = null;   // ブラウザが返した最新のGPS位置(AR.jsが採用した位置と比べるため)
 if (navigator.geolocation) {
-  navigator.geolocation.watchPosition((p) => { gpsAcc = p.coords.accuracy; }, () => {}, { enableHighAccuracy: true, maximumAge: 0 });
+  navigator.geolocation.watchPosition((p) => { gpsAcc = p.coords.accuracy; gpsRaw = { lat: p.coords.latitude, lng: p.coords.longitude }; }, () => {}, { enableHighAccuracy: true, maximumAge: 0 });
 }
 
 // 方位の確認(読み取り専用): スマホを回したときに「向き」が変わるか、対象がどちら側にあるかを表示する
@@ -401,7 +402,9 @@ setInterval(() => {
   el.innerHTML = `距離${Math.hypot(dN, dE).toFixed(1)}m / 対象の方角${bearing.toFixed(0)}° / カメラの向き${hFix.toFixed(0)}°(補正後) / 差${diff > 0 ? '+' : ''}${diff.toFixed(0)}°(+は右)<br>` +
     `OSコンパス${cmp === null ? '取得なし' : cmp.toFixed(0) + '°'} / AR.jsとのずれ${gap === null ? '-' : (gap > 0 ? '+' : '') + gap.toFixed(0) + '°'} / [${BUILD}] ${yawReason} / 補正${appliedDelta.toFixed(0)}° / AR.js生${heading.toFixed(0)}° / GPS精度${gpsAcc === null ? '-' : '±' + gpsAcc.toFixed(0) + 'm'} / 傾き${ori.beta === null ? '-' : ori.beta.toFixed(0) + '°'}` +
     (curS !== null ? ` / 拡大率${curS.toFixed(1)} 画面幅比${(curFrac * 100).toFixed(0)}% カメラY${cameraEl.object3D.position.y.toFixed(1)}` : '');
-  el.innerHTML += `<br>対象 ${tgt.lat.toFixed(6)}, ${tgt.lng.toFixed(6)} / 現在 ${lastFix.lat.toFixed(6)}, ${lastFix.lng.toFixed(6)}`;
+  const rawGap = gpsRaw ? Math.hypot((gpsRaw.lat - lastFix.lat) * M, (gpsRaw.lng - lastFix.lng) * M * Math.cos(lastFix.lat * Math.PI / 180)) : null;
+  el.innerHTML += `<br>対象 ${tgt.lat.toFixed(6)}, ${tgt.lng.toFixed(6)} / 現在 ${lastFix.lat.toFixed(6)}, ${lastFix.lng.toFixed(6)}` +
+    `<br>ブラウザの最新GPSとAR.js採用位置の差 ${rawGap === null ? '-' : rawGap.toFixed(0) + 'm'}`;
 }, 300);
 
 // 距離表示(読み取り専用。描画には一切干渉しない)
