@@ -22,11 +22,11 @@
 <div id="status" style="position:fixed; top:8px; left:8px; right:8px; z-index:600; color:#fff; background:rgba(0,0,0,0.5); padding:6px 10px; font-family:sans-serif; font-size:13px; border-radius:6px;">
   読み込み中...
 </div>
-<div id="debug-display" style="display:none; position:fixed; bottom:44px; left:8px; right:8px; z-index:600; text-align:center; color:#fff; background:rgba(0,0,0,0.5); padding:4px 8px; font-family:sans-serif; font-size:12px; border-radius:6px;"></div>
+<div id="debug-display" style="display:none; position:fixed; bottom:96px; left:8px; right:8px; z-index:600; text-align:center; color:#fff; background:rgba(0,0,0,0.5); padding:4px 8px; font-family:sans-serif; font-size:12px; border-radius:6px;"></div>
 <div id="distance-display" style="position:fixed; bottom:16px; left:0; right:0; z-index:600; text-align:center; color:#fff; font-size:16px; font-weight:bold; text-shadow:0 1px 4px #000;"></div>
 
 <!-- test.html で実機確認した内容を、そのまま viewer.html にしたもの。
-     test.html との違いは「eruda・デバッグ表示を ?debug=1 のときだけ出す」点のみ。
+     test.html との違いは「アニメーションを既定で再生する」点と、「eruda・デバッグ表示を ?debug=1 のときだけ出す」点のみ。
      カスタムのタップ画面・videoTexture・look-controls関連の追加は一切なし -->
 <a-scene
   vr-mode-ui="enabled: false"
@@ -43,19 +43,31 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getFirestore, doc, getDoc }
   from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { initializeAppCheck, ReCaptchaV3Provider }
+  from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js';
 
 // ════════════════════════════════════════════════
 // TODO: index.htmlと同じFirebaseプロジェクトの値に置き換えてください
 // (?idを付けて開く「モードB」でのみ使用されます)
 // ════════════════════════════════════════════════
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyByb6EuWZ9Iy9QiR0Nw6IWRb8O_JQqpMSc",
+  authDomain: "findar-ae099.firebaseapp.com",
+  databaseURL: "https://findar-ae099-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "findar-ae099",
+  storageBucket: "findar-ae099.firebasestorage.app",
+  messagingSenderId: "1043165089164",
+  appId: "1:1043165089164:web:0db15bfbef3d85d8df1aa9",
+  measurementId: "G-J7H2LC9FFS"
 };
+
+// ════════════════════════════════════════════════
+// TODO: App Check(reCAPTCHA v3)のサイトキーに置き換えてください
+//   サイトキーは公開用の値です(秘密鍵ではありません)。秘密鍵はFirebaseコンソール側にだけ登録します。
+//   置き換えるまでは App Check を使わずに動きます(座標の取得はできます)。
+//   ?appcheckdebug=1 を付けると、デバッグトークンがコンソールに出ます(コンソールの App Check に登録して使う)
+// ════════════════════════════════════════════════
+const RECAPTCHA_SITE_KEY = "6LeQYFItAAAAAGaVvZx_Txa8M26qytXHou4ZXmqk";
 
 // ════════════════════════════════════════════════
 // 設定(URLパラメータで上書き可能)
@@ -69,10 +81,13 @@ const firebaseConfig = {
 //   ?fit=0.6     近くで大きくなりすぎないための上限。画面の横幅(縦持ち)に対するモデルの幅の割合
 //   ?smin=0.15   拡大率の下限
 //   ?smax=30     拡大率の上限
-//   ?h=2         地上からの高さ(m)。モデルの中心がこの高さに来る
+//   ?h=10        地上からの高さ(m)。モデルの中心がこの高さに来る
 //   ?anchor=bottom  h をモデルの「下端」の高さにする(既定は中心)
 //   ?eye=1.6     スマホを持つ目の高さ(m)。地面の位置の推定に使う
 //   ?yoff=0      高さの微調整(m。上に上げるなら正の値)
+//   ── 方位の補正(iPhoneでAR.jsの向きがOSのコンパスとずれるのを補正する) ──
+//   ?comp=0      0: 自動補正をやめる(既定は補正あり。iPhoneのみ)
+//   ?yaw=0       手動の補正(度)。自動補正の上にさらに足す。正の値で、対象が見える向きを時計回りに回す
 //   ?scale=1     base にかける倍率(全体をもう少し大きく/小さくしたいとき)
 //   ?ry=90       Y軸まわりの回転角(度)
 //   ?emi=0.55    発光倍率(1だと白飛びする)
@@ -91,9 +106,13 @@ const BASE = num('base', 4);
 const ALPHA = num('alpha', 0.6);
 const SMIN = num('smin', 0.15);
 const SMAX = num('smax', 30);
-const HEIGHT = num('h', 2);
+const HEIGHT = num('h', 10);
 const EYE = num('eye', 1.6);
 const ANCHOR = params.get('anchor') === 'bottom' ? 'bottom' : 'center';
+const YAW = num('yaw', 0);
+const COMP = params.get('comp') !== '0';
+const BUILD = 'yaw1';   // 画面下の表示とログに出す版の目印(古いファイルが読まれていないかの確認用)
+console.log('[BUILD]', BUILD);
 const RY = num('ry', 90);
 const EMI = num('emi', 0.55);
 const FPS = num('fps', 24);
@@ -113,6 +132,8 @@ let target = null;   // モードBのみ使用: Firestoreの座標
 let lastFix = null;  // 自分の最新のGPS位置
 let placed = false;
 let holo = null;
+let ref = null;            // 位置の基準になる、見えない目印(GPS配置の計算だけを使う)
+const followers = [];      // 補正した位置に置くエンティティ(モデル・赤い箱)
 
 // ── モードB: ?id=xxxx がある場合のみFirestoreから座標を取得(ページ読み込み時に自動実行) ──
 async function loadTarget() {
@@ -123,6 +144,18 @@ async function loadTarget() {
   statusEl.textContent = 'モードB: Firestoreから座標を取得中...';
   try {
     const app = initializeApp(firebaseConfig);
+    // App Check は Firestore を使う前に初期化する。失敗しても座標の取得は試みる(適用がオフなら通る)
+    if (RECAPTCHA_SITE_KEY && !RECAPTCHA_SITE_KEY.startsWith('YOUR_')) {
+      try {
+        if (new URLSearchParams(location.search).get('appcheckdebug') === '1') self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+        initializeAppCheck(app, { provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY), isTokenAutoRefreshEnabled: true });
+        console.log('[APPCHECK] 初期化しました');
+      } catch (e) {
+        console.error('[APPCHECK] 初期化に失敗しました', e);
+      }
+    } else {
+      console.log('[APPCHECK] サイトキー未設定のため、App Check は使いません');
+    }
     const db = getFirestore(app);
     const snap = await getDoc(doc(db, 'meetups', meetupId));
     if (!snap.exists()) { statusEl.textContent = '座標が見つかりませんでした(idを確認してください)'; return; }
@@ -157,20 +190,25 @@ function tryPlace() {
   holo.setAttribute('scale', '1 1 1');      // 実際の拡大率は fitFrame() が距離から毎フレーム決める
   holo.setAttribute('visible', 'false');    // 最初の計算が済むまで隠す(大きさが一瞬ちらつくのを防ぐ)
   holo.setAttribute('rotation', `0 ${RY} 0`);
-  holo.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lng};`);
   holo.addEventListener('model-loaded', (e) => setupModel(e.detail.model));
   holo.addEventListener('model-error', (e) => {
     console.error('[GLB] model-error', e.detail);
     statusEl.textContent += ' / GLBの読み込みに失敗(ファイル名・場所を確認)';
   });
+  // AR.jsのGPS配置の計算は、見えない目印(ref)にだけ使う。
+  // モデル・赤い箱は、ref の位置を「カメラの周りに方位のずれ Δ だけ回した」場所へ fitFrame() が置く
+  ref = document.createElement('a-entity');
+  ref.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lng};`);
+  sceneEl.appendChild(ref);
   sceneEl.appendChild(holo);
+  followers.push(holo);
   if (SHOW_BOX) {   // 基準版と同じ赤い箱(切り分け用)
     const box = document.createElement('a-box');
     box.setAttribute('color', 'red');
     box.setAttribute('scale', '10 10 10');
     box.setAttribute('material', 'side: double');
-    box.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lng};`);
     sceneEl.appendChild(box);
+    followers.push(box);
     console.log('[AR] 赤い箱も配置(?box=1)');
   }
   console.log('[AR] GLB entity placed', lat, lng, SRC);
@@ -269,6 +307,7 @@ let curS = null;      // 現在の拡大率(なめらかに追従)
 let curFrac = 0;      // 画面の横幅に対する見かけの幅(診断表示用)
 let fitModel = null;
 let fitShown = false;
+let relS = null;          // カメラから見た対象の相対位置(なめらかに追従させる)
 
 function startFit(model) {
   holo.object3D.updateMatrixWorld(true);
@@ -294,11 +333,51 @@ function startFit(model) {
   requestAnimationFrame(fitFrame);
 }
 
+// ── 方位補正 ──
+// iPhoneでは、AR.jsが使っているカメラの向きが、OSのコンパスと大きくずれることがある。
+// そのずれ Δ(AR.jsの向き − OSコンパス)を、スマホを縦に持っている間だけ測り(なめらかに平均)、
+// 対象の位置を「カメラの周りに Δ だけ回して」置くことで、実際の方角に見えるようにする。
+let appliedDelta = 0;
+let deltaVec = null;
+let yawReason = '-';
+let yawLogAt = 0;
+function currentDelta(cam) {
+  const reason = !COMP ? '補正オフ(comp=0)' : !ori.ios ? 'iOS以外(補正なし)' : ori.compass === null ? 'コンパス未取得'
+    : (ori.beta === null || ori.beta <= 40 || ori.beta >= 140) ? '傾き範囲外(直前の値を保持)' : '測定中';
+  if (reason !== yawReason) { yawReason = reason; console.log(`[YAW] 状態: ${reason}`); }
+  if (COMP && ori.ios && ori.compass !== null && ori.beta !== null && ori.beta > 40 && ori.beta < 140) {
+    const dir = new THREE.Vector3();
+    cam.getWorldDirection(dir);
+    const g = Math.atan2(dir.x, -dir.z) - ori.compass * Math.PI / 180;
+    const vx = Math.cos(g), vy = Math.sin(g);   // 角度は円なので、単位ベクトルで平均する
+    deltaVec = deltaVec === null ? { x: vx, y: vy } : { x: deltaVec.x + (vx - deltaVec.x) * 0.05, y: deltaVec.y + (vy - deltaVec.y) * 0.05 };
+  }
+  const auto = deltaVec ? Math.atan2(deltaVec.y, deltaVec.x) * 180 / Math.PI : 0;
+  const now = performance.now();
+  if (now - yawLogAt > 2000) {
+    yawLogAt = now;
+    console.log(`[YAW] Δ(AR.js−OSコンパス)=${auto.toFixed(0)}° / 適用=${(auto + YAW).toFixed(0)}° / OSコンパス=${ori.compass === null ? '-' : ori.compass.toFixed(0)}° / 傾き=${ori.beta === null ? '-' : ori.beta.toFixed(0)}°`);
+  }
+  return auto + YAW;
+}
+
 function fitFrame() {
   requestAnimationFrame(fitFrame);
   const cam = cameraEl.getObject3D('camera');
-  if (!fit || !cam || !holo || !holo.object3D) return;
+  if (!fit || !cam || !holo || !holo.object3D || !ref) return;
   const cp = cameraEl.object3D.position;
+  const rp = ref.object3D.position;
+  if (rp.x === 0 && rp.z === 0) return;   // ref のGPS配置の計算がまだ
+  appliedDelta = currentDelta(cam);
+  const r = appliedDelta * Math.PI / 180, co = Math.cos(r), si = Math.sin(r);
+  const vx = rp.x - cp.x, vz = rp.z - cp.z;
+  const px = cp.x + vx * co - vz * si;
+  const pz = cp.z + vx * si + vz * co;
+  // GPSが更新されたとき、モデルが一気に飛ばないよう、カメラから見た相対位置をなめらかに追従させる
+  const tx = px - cp.x, tz = pz - cp.z;
+  if (relS === null) relS = { x: tx, z: tz };
+  else { relS.x += (tx - relS.x) * 0.15; relS.z += (tz - relS.z) * 0.15; }
+  followers.forEach((f) => f.object3D.position.set(cp.x + relS.x, rp.y, cp.z + relS.z));
   const ep = holo.object3D.position;
   const d = Math.max(Math.hypot(cp.x - ep.x, cp.z - ep.z), 1);
   // 画面の横幅(いまの向きの画面)で、距離 d の位置に見える実寸
@@ -321,15 +400,23 @@ function tick(nowMs) {
 }
 
 // OSのコンパス値(診断用・読み取りのみ): AR.jsが使っているカメラの向きと、OS自身のコンパスの値を比べる
-const ori = { compass: null, beta: null };
+const ori = { compass: null, beta: null, ios: false };
 function onOri(e) {
   const c = (typeof e.webkitCompassHeading === 'number') ? e.webkitCompassHeading
           : (e.absolute && e.alpha !== null ? (360 - e.alpha) % 360 : null);
+  if (typeof e.webkitCompassHeading === 'number') ori.ios = true;
   if (c !== null) ori.compass = c;
   if (e.beta !== null) ori.beta = e.beta;
 }
 window.addEventListener('deviceorientation', onOri);
 window.addEventListener('deviceorientationabsolute', onOri);
+
+// GPSの精度(診断用・読み取りのみ): 現在地の誤差の目安(m)
+let gpsAcc = null;
+let gpsRaw = null;   // ブラウザが返した最新のGPS位置(AR.jsが採用した位置と比べるため)
+if (navigator.geolocation) {
+  navigator.geolocation.watchPosition((p) => { gpsAcc = p.coords.accuracy; gpsRaw = { lat: p.coords.latitude, lng: p.coords.longitude }; }, () => {}, { enableHighAccuracy: true, maximumAge: 0 });
+}
 
 // 方位の確認(読み取り専用): スマホを回したときに「向き」が変わるか、対象がどちら側にあるかを表示する
 setInterval(() => {
@@ -346,19 +433,30 @@ setInterval(() => {
   const dir = new THREE.Vector3();
   cam.getWorldDirection(dir);
   const heading = (Math.atan2(dir.x, -dir.z) * 180 / Math.PI + 360) % 360; // カメラの向き(北から時計回り)
-  const diff = ((bearing - heading + 540) % 360) - 180;                   // +なら対象は右側
+  const hFix = (heading - appliedDelta + 720) % 360;                       // 補正後のカメラの向き
+  const diff = ((bearing - hFix + 540) % 360) - 180;                      // +なら対象は右側
   const cmp = ori.compass;
   const gap = cmp === null ? null : ((heading - cmp + 540) % 360) - 180;   // AR.jsの向き − OSコンパス
-  el.innerHTML = `距離${Math.hypot(dN, dE).toFixed(1)}m / 対象の方角${bearing.toFixed(0)}° / カメラの向き${heading.toFixed(0)}° / 差${diff > 0 ? '+' : ''}${diff.toFixed(0)}°(+は右)<br>` +
-    `OSコンパス${cmp === null ? '取得なし' : cmp.toFixed(0) + '°'} / AR.jsとのずれ${gap === null ? '-' : (gap > 0 ? '+' : '') + gap.toFixed(0) + '°'} / 傾き${ori.beta === null ? '-' : ori.beta.toFixed(0) + '°'}` +
+  el.innerHTML = `距離${Math.hypot(dN, dE).toFixed(1)}m / 対象の方角${bearing.toFixed(0)}° / カメラの向き${hFix.toFixed(0)}°(補正後) / 差${diff > 0 ? '+' : ''}${diff.toFixed(0)}°(+は右)<br>` +
+    `OSコンパス${cmp === null ? '取得なし' : cmp.toFixed(0) + '°'} / AR.jsとのずれ${gap === null ? '-' : (gap > 0 ? '+' : '') + gap.toFixed(0) + '°'} / [${BUILD}] ${yawReason} / 補正${appliedDelta.toFixed(0)}° / AR.js生${heading.toFixed(0)}° / GPS精度${gpsAcc === null ? '-' : '±' + gpsAcc.toFixed(0) + 'm'} / 傾き${ori.beta === null ? '-' : ori.beta.toFixed(0) + '°'}` +
     (curS !== null ? ` / 拡大率${curS.toFixed(1)} 画面幅比${(curFrac * 100).toFixed(0)}% カメラY${cameraEl.object3D.position.y.toFixed(1)}` : '');
+  const rawGap = gpsRaw ? Math.hypot((gpsRaw.lat - lastFix.lat) * M, (gpsRaw.lng - lastFix.lng) * M * Math.cos(lastFix.lat * Math.PI / 180)) : null;
+  el.innerHTML += `<br>対象 ${tgt.lat.toFixed(6)}, ${tgt.lng.toFixed(6)} / 現在 ${lastFix.lat.toFixed(6)}, ${lastFix.lng.toFixed(6)}` +
+    `<br>ブラウザの最新GPSとAR.js採用位置の差 ${rawGap === null ? '-' : rawGap.toFixed(0) + 'm'}` +
+    `<br>カメラ縦画角${cam.fov.toFixed(0)}° アスペクト${cam.aspect.toFixed(2)} / 画面${sceneEl.canvas ? sceneEl.canvas.clientWidth + '×' + sceneEl.canvas.clientHeight : '-'}`;
 }, 300);
 
-// 距離表示(読み取り専用。描画には一切干渉しない)
+// 距離表示: AR.jsの内部座標は水平方向が伸びているため、GPSから計算した「実際のメートル」で表示する。
+// 近いとき(GPS精度の2倍、最低25m)は、方向がずれて見えることがある旨を案内する
 setInterval(() => {
-  if (!holo || !holo.object3D) return;
-  const d = cameraEl.object3D.position.distanceTo(holo.object3D.position);
-  document.getElementById('distance-display').textContent = `対象まで: 約${d.toFixed(1)}m`;
+  if (!lastFix || !placed) return;
+  const tgt = target || { lat: lastFix.lat + 0.0001, lng: lastFix.lng };
+  const M = 111195;
+  const dist = Math.hypot((tgt.lat - lastFix.lat) * M, (tgt.lng - lastFix.lng) * M * Math.cos(lastFix.lat * Math.PI / 180));
+  const near = Math.max(25, 2 * (gpsAcc ?? 15));
+  const el = document.getElementById('distance-display');
+  el.innerHTML = `対象まで 約${dist.toFixed(0)}m` +
+    (dist < near ? `<br><span style="font-size:13px; font-weight:normal;">すぐ近くです。GPSの誤差(±${gpsAcc === null ? '?' : gpsAcc.toFixed(0)}m)で、実際の位置と少しずれて見えることがあります。周りを見回してください</span>` : '');
 }, 300);
 
 loadTarget().then(tryPlace);
