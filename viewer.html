@@ -17,16 +17,16 @@
 <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/three.js/build/ar-threex-location-only.js"></script>
 <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/aframe/build/aframe-ar.js"></script>
 </head>
-<body style="margin:0; overflow:hidden;">
+<body style="margin:0; overflow:hidden; font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic', Meiryo, sans-serif;">
 
-<div id="status" style="position:fixed; top:8px; left:8px; right:8px; z-index:600; color:#fff; background:rgba(0,0,0,0.5); padding:6px 10px; font-family:sans-serif; font-size:13px; border-radius:6px;">
+<div id="status" style="display:none; position:fixed; top:8px; left:8px; right:8px; z-index:600; color:#fff; background:rgba(0,0,0,0.5); padding:6px 10px; font-family:sans-serif; font-size:13px; border-radius:6px;">
   読み込み中...
 </div>
 <div id="debug-display" style="display:none; position:fixed; bottom:96px; left:8px; right:8px; z-index:600; text-align:center; color:#fff; background:rgba(0,0,0,0.5); padding:4px 8px; font-family:sans-serif; font-size:12px; border-radius:6px;"></div>
 <div id="distance-display" style="position:fixed; bottom:16px; left:0; right:0; z-index:600; text-align:center; color:#fff; font-size:16px; font-weight:bold; text-shadow:0 1px 4px #000;"></div>
 
 <!-- test.html で実機確認した内容を、そのまま viewer.html にしたもの。
-     test.html との違いは「アニメーションを既定で再生する」点と、「eruda・デバッグ表示を ?debug=1 のときだけ出す」点のみ。
+     test.html との違いは「アニメーションを既定で再生する」点と、「状態表示・eruda・デバッグ表示を ?debug=1 のとき(エラーは常に)だけ出す」点のみ。
      カスタムのタップ画面・videoTexture・look-controls関連の追加は一切なし -->
 <a-scene
   vr-mode-ui="enabled: false"
@@ -71,7 +71,7 @@ const RECAPTCHA_SITE_KEY = "6LeQYFItAAAAAGaVvZx_Txa8M26qytXHou4ZXmqk";
 
 // ════════════════════════════════════════════════
 // 設定(URLパラメータで上書き可能)
-//   ?debug=1     スマホ用コンソール(eruda)と、方位・距離のデバッグ表示を出す
+//   ?debug=1     スマホ用コンソール(eruda)と、状態・方位・距離のデバッグ表示を出す
 //   ?id=xxxx     モードB: Firestoreの座標に配置(通常の使い方) / 付けない: モードA(自分の北約11mに配置。動作確認用)
 //   ?anim=0      0: 静止表示(frameで指定した姿勢) / 付けない: 出現→ループのアニメーション再生(既定)
 //   ?frame=30    静止表示(anim=0)のときのフレーム(既定30 = 立方体が消えて破片のブロックが残った姿勢)
@@ -81,7 +81,7 @@ const RECAPTCHA_SITE_KEY = "6LeQYFItAAAAAGaVvZx_Txa8M26qytXHou4ZXmqk";
 //   ?fit=0.6     近くで大きくなりすぎないための上限。画面の横幅(縦持ち)に対するモデルの幅の割合
 //   ?smin=0.15   拡大率の下限
 //   ?smax=30     拡大率の上限
-//   ?h=10        地上からの高さ(m)。モデルの中心がこの高さに来る
+//   ?h=4         地上からの高さ(m)。モデルの中心がこの高さに来る(10では、近づくと画面の上に外れやすい)
 //   ?anchor=bottom  h をモデルの「下端」の高さにする(既定は中心)
 //   ?eye=1.6     スマホを持つ目の高さ(m)。地面の位置の推定に使う
 //   ?yoff=0      高さの微調整(m。上に上げるなら正の値)
@@ -106,7 +106,7 @@ const BASE = num('base', 4);
 const ALPHA = num('alpha', 0.6);
 const SMIN = num('smin', 0.15);
 const SMAX = num('smax', 30);
-const HEIGHT = num('h', 10);
+const HEIGHT = num('h', 6);
 const EYE = num('eye', 1.6);
 const ANCHOR = params.get('anchor') === 'bottom' ? 'bottom' : 'center';
 const YAW = num('yaw', 0);
@@ -121,7 +121,10 @@ const LOOP_END_F = num('end', 90);
 const SRC = params.get('src') || './FindAR_v8.glb';
 const SHOW_BOX = params.get('box') === '1';
 const DEBUG = params.get('debug') === '1';
-if (DEBUG) document.getElementById('debug-display').style.display = 'block';
+if (DEBUG) {
+  document.getElementById('debug-display').style.display = 'block';
+  document.getElementById('status').style.display = 'block';
+}
 
 const statusEl = document.getElementById('status');
 const cameraEl = document.querySelector('[gps-new-camera]');
@@ -158,14 +161,14 @@ async function loadTarget() {
     }
     const db = getFirestore(app);
     const snap = await getDoc(doc(db, 'meetups', meetupId));
-    if (!snap.exists()) { statusEl.textContent = '座標が見つかりませんでした(idを確認してください)'; return; }
+    if (!snap.exists()) { statusEl.textContent = '座標が見つかりませんでした(idを確認してください)'; statusEl.style.display = 'block'; return; }
     const data = snap.data();
     target = { lat: data.lat, lng: data.lng };
     console.log('[FIRESTORE] target fetched', target);
     statusEl.textContent = `モードB: 対象座標 ${target.lat.toFixed(6)}, ${target.lng.toFixed(6)}`;
   } catch (err) {
     console.error('[FIRESTORE] error', err);
-    statusEl.textContent = 'Firestore取得に失敗しました';
+    statusEl.textContent = 'Firestore取得に失敗しました'; statusEl.style.display = 'block';
   }
 }
 
@@ -193,7 +196,7 @@ function tryPlace() {
   holo.addEventListener('model-loaded', (e) => setupModel(e.detail.model));
   holo.addEventListener('model-error', (e) => {
     console.error('[GLB] model-error', e.detail);
-    statusEl.textContent += ' / GLBの読み込みに失敗(ファイル名・場所を確認)';
+    statusEl.textContent += ' / GLBの読み込みに失敗(ファイル名・場所を確認)'; statusEl.style.display = 'block';
   });
   // AR.jsのGPS配置の計算は、見えない目印(ref)にだけ使う。
   // モデル・赤い箱は、ref の位置を「カメラの周りに方位のずれ Δ だけ回した」場所へ fitFrame() が置く
