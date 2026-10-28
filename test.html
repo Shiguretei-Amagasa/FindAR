@@ -9,14 +9,31 @@
 <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
 <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/three.js/build/ar-threex-location-only.js"></script>
 <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/aframe/build/aframe-ar.js"></script>
+<style>
+  :root { --holo: #C0A0FF; }   /* モデルに合わせた色(HoloMainのベースカラー)。変えるときはここだけ */
+  .edge-arrow { position: fixed; top: 50%; z-index: 600; pointer-events: none; opacity: 0; transform: translateY(-50%); transition: opacity .5s ease; }
+  .edge-arrow.on { opacity: 1; }
+  .edge-arrow.left { left: 6px; }
+  .edge-arrow.right { right: 6px; }
+  .edge-arrow svg { display: block; width: 44px; height: 60px; color: var(--holo);
+    filter: drop-shadow(0 0 6px var(--holo)) drop-shadow(0 0 14px rgba(192,160,255,.6));
+    animation: holoPulse 1.8s ease-in-out infinite; }
+  .edge-arrow.left svg { transform: scaleX(-1); }
+  @keyframes holoPulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+  #distance-display .turn { color: var(--holo); }
+</style>
 </head>
-<body style="margin:0; overflow:hidden;">
+<body style="margin:0; overflow:hidden; font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic', Meiryo, sans-serif;">
 
 <div id="status" style="position:fixed; top:8px; left:8px; right:8px; z-index:600; color:#fff; background:rgba(0,0,0,0.5); padding:6px 10px; font-family:sans-serif; font-size:13px; border-radius:6px;">
   読み込み中...
 </div>
 <div id="debug-display" style="position:fixed; bottom:96px; left:8px; right:8px; z-index:600; text-align:center; color:#fff; background:rgba(0,0,0,0.5); padding:4px 8px; font-family:sans-serif; font-size:12px; border-radius:6px;"></div>
 <div id="distance-display" style="position:fixed; bottom:16px; left:0; right:0; z-index:600; text-align:center; color:#fff; font-size:16px; font-weight:bold; text-shadow:0 1px 4px #000;"></div>
+
+<!-- 対象が視野の外にあるとき、その側の画面の端に出る矢印(モデルと同じ色で、脈動する) -->
+<div id="arrow-left" class="edge-arrow left"><svg viewBox="0 0 44 60"><polygon points="4,4 40,30 4,56" fill="currentColor"/></svg></div>
+<div id="arrow-right" class="edge-arrow right"><svg viewBox="0 0 44 60"><polygon points="4,4 40,30 4,56" fill="currentColor"/></svg></div>
 
 <!-- 動作確認済みの基準版(位置情報成功test.html)の構成のまま。
      変更点は「赤い箱 → FindAR_v8.glb」への置き換えと、ライト2つの追加のみ。
@@ -36,6 +53,8 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getFirestore, doc, getDoc }
   from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { initializeAppCheck, ReCaptchaV3Provider }
+  from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js';
 
 // ════════════════════════════════════════════════
 // TODO: index.htmlと同じFirebaseプロジェクトの値に置き換えてください
@@ -53,6 +72,14 @@ const firebaseConfig = {
 };
 
 // ════════════════════════════════════════════════
+// TODO: App Check(reCAPTCHA v3)のサイトキーに置き換えてください
+//   サイトキーは公開用の値です(秘密鍵ではありません)。秘密鍵はFirebaseコンソール側にだけ登録します。
+//   置き換えるまでは App Check を使わずに動きます(座標の取得はできます)。
+//   ?appcheckdebug=1 を付けると、デバッグトークンがコンソールに出ます(コンソールの App Check に登録して使う)
+// ════════════════════════════════════════════════
+const RECAPTCHA_SITE_KEY = "YOUR_RECAPTCHA_SITE_KEY";
+
+// ════════════════════════════════════════════════
 // 設定(URLパラメータで上書き可能)
 //   ?id=xxxx     モードB: Firestoreの座標に配置 / 付けない: モードA(自分の北約11mに配置)
 //   ?anim=1      1: 出現→ループのアニメーション再生 / 付けない: 静止表示(frameで指定した姿勢)
@@ -63,14 +90,10 @@ const firebaseConfig = {
 //   ?fit=0.6     近くで大きくなりすぎないための上限。画面の横幅(縦持ち)に対するモデルの幅の割合
 //   ?smin=0.15   拡大率の下限
 //   ?smax=30     拡大率の上限
-//   ?h=10        地上からの高さ(m)。モデルの中心がこの高さに来る
+//   ?h=4         地上からの高さ(m)。モデルの中心がこの高さに来る(10では、近づくと画面の上に外れやすい)
 //   ?anchor=bottom  h をモデルの「下端」の高さにする(既定は中心)
 //   ?eye=1.6     スマホを持つ目の高さ(m)。地面の位置の推定に使う
 //   ?yoff=0      高さの微調整(m。上に上げるなら正の値)
-//   ── 近距離の見せ方(GPSの誤差を前提にした表示) ──
-//   ?pillar=0    光の柱を出さない(既定は出す)。遠くからでも見え、水平位置のずれが目立たない
-//   ?ring=0      誤差の範囲を示す円を出さない(既定は出す)。半径はGPS精度と、保存位置の誤差(err)から決める
-//   ?err=10      保存された位置の誤差の想定(m)。円の半径に使う
 //   ── 方位の補正(iPhoneでAR.jsの向きがOSのコンパスとずれるのを補正する) ──
 //   ?comp=0      0: 自動補正をやめる(既定は補正あり。iPhoneのみ)
 //   ?yaw=0       手動の補正(度)。自動補正の上にさらに足す。正の値で、対象が見える向きを時計回りに回す
@@ -92,13 +115,10 @@ const BASE = num('base', 4);
 const ALPHA = num('alpha', 0.6);
 const SMIN = num('smin', 0.15);
 const SMAX = num('smax', 30);
-const HEIGHT = num('h', 10);
+const HEIGHT = num('h', 4);
 const EYE = num('eye', 1.6);
 const ANCHOR = params.get('anchor') === 'bottom' ? 'bottom' : 'center';
 const YAW = num('yaw', 0);
-const PILLAR = params.get('pillar') !== '0';
-const RING = params.get('ring') !== '0';
-const ERR = num('err', 10);
 const COMP = params.get('comp') !== '0';
 const BUILD = 'yaw1';   // 画面下の表示とログに出す版の目印(古いファイルが読まれていないかの確認用)
 console.log('[BUILD]', BUILD);
@@ -131,6 +151,18 @@ async function loadTarget() {
   statusEl.textContent = 'モードB: Firestoreから座標を取得中...';
   try {
     const app = initializeApp(firebaseConfig);
+    // App Check は Firestore を使う前に初期化する。失敗しても座標の取得は試みる(適用がオフなら通る)
+    if (RECAPTCHA_SITE_KEY && !RECAPTCHA_SITE_KEY.startsWith('YOUR_')) {
+      try {
+        if (new URLSearchParams(location.search).get('appcheckdebug') === '1') self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+        initializeAppCheck(app, { provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY), isTokenAutoRefreshEnabled: true });
+        console.log('[APPCHECK] 初期化しました');
+      } catch (e) {
+        console.error('[APPCHECK] 初期化に失敗しました', e);
+      }
+    } else {
+      console.log('[APPCHECK] サイトキー未設定のため、App Check は使いません');
+    }
     const db = getFirestore(app);
     const snap = await getDoc(doc(db, 'meetups', meetupId));
     if (!snap.exists()) { statusEl.textContent = '座標が見つかりませんでした(idを確認してください)'; return; }
@@ -177,27 +209,6 @@ function tryPlace() {
   sceneEl.appendChild(ref);
   sceneEl.appendChild(holo);
   followers.push(holo);
-  const glow = 'color: #C0A0FF; shader: flat; transparent: true; side: double; depthWrite: false;';
-  if (PILLAR) {   // 光の柱: 遠くからでも見え、水平の位置がずれても目立たない
-    pillar = document.createElement('a-cylinder');
-    pillar.setAttribute('radius', '1');
-    pillar.setAttribute('height', '1');
-    pillar.setAttribute('open-ended', 'true');
-    pillar.setAttribute('segments-radial', '24');
-    pillar.setAttribute('material', glow + ' opacity: 0.22;');
-    pillar.setAttribute('visible', 'false');
-    sceneEl.appendChild(pillar);
-  }
-  if (RING) {     // 誤差の範囲の円: 「このあたり」を示す。半径はGPS精度から決める
-    ring = document.createElement('a-ring');
-    ring.setAttribute('radius-inner', '0.94');
-    ring.setAttribute('radius-outer', '1');
-    ring.setAttribute('segments-theta', '48');
-    ring.setAttribute('rotation', '-90 0 0');
-    ring.setAttribute('material', glow + ' opacity: 0.55;');
-    ring.setAttribute('visible', 'false');
-    sceneEl.appendChild(ring);
-  }
   if (SHOW_BOX) {   // 基準版と同じ赤い箱(切り分け用)
     const box = document.createElement('a-box');
     box.setAttribute('color', 'red');
@@ -304,7 +315,6 @@ let curFrac = 0;      // 画面の横幅に対する見かけの幅(診断表示
 let fitModel = null;
 let fitShown = false;
 let relS = null;          // カメラから見た対象の相対位置(なめらかに追従させる)
-let pillar = null, ring = null;   // 光の柱 / 誤差の範囲の円
 
 function startFit(model) {
   holo.object3D.updateMatrixWorld(true);
@@ -387,20 +397,7 @@ function fitFrame() {
   holo.object3D.scale.setScalar(curS);
   const groundY = cp.y - EYE;
   fitModel.position.y = (groundY + HEIGHT + YOFF - ep.y) / curS - fit.relY;
-  // 光の柱(見かけの太さ・高さを一定に保つ)と、誤差の円(半径はGPS精度から。AR.jsの座標は水平方向が 1/cos(緯度) 倍に伸びているので合わせる)
-  const K = lastFix ? 1 / Math.cos(lastFix.lat * Math.PI / 180) : 1.23;
-  const gx = holo.object3D.position.x, gz = holo.object3D.position.z;
-  if (pillar) {
-    const r = Math.max(0.013 * d, 0.3), H = Math.max(0.6 * d, 30);
-    pillar.object3D.scale.set(r, H, r);
-    pillar.object3D.position.set(gx, groundY + H / 2, gz);
-  }
-  if (ring) {
-    const R = Math.min(Math.max(Math.hypot(gpsAcc ?? 15, ERR), 8), 60) * K;
-    ring.object3D.scale.set(R, R, 1);
-    ring.object3D.position.set(gx, groundY + 0.05, gz);
-  }
-  if (!fitShown) { holo.setAttribute('visible', 'true'); if (pillar) pillar.setAttribute('visible', 'true'); if (ring) ring.setAttribute('visible', 'true'); fitShown = true; console.log(`[FIT] 表示開始 / 距離${d.toFixed(1)}m 拡大率${curS.toFixed(2)} カメラY${cp.y.toFixed(2)}`); }
+  if (!fitShown) { holo.setAttribute('visible', 'true'); fitShown = true; console.log(`[FIT] 表示開始 / 距離${d.toFixed(1)}m 拡大率${curS.toFixed(2)} カメラY${cp.y.toFixed(2)}`); }
 }
 
 function tick(nowMs) {
@@ -455,18 +452,43 @@ setInterval(() => {
     `<br>カメラ縦画角${cam.fov.toFixed(0)}° アスペクト${cam.aspect.toFixed(2)} / 画面${sceneEl.canvas ? sceneEl.canvas.clientWidth + '×' + sceneEl.canvas.clientHeight : '-'}`;
 }, 300);
 
-// 距離表示: AR.jsの内部座標は水平方向が伸びているため、GPSから計算した「実際のメートル」で表示する。
-// 近いとき(GPS精度の2倍、最低25m)は、方向がずれて見えることがある旨を案内する
+// ── 下部のテキスト(距離・向きのずれ)と、画面の端の矢印 ──
+// 向きのずれ = 対象の方角 − カメラの向き(補正後)。+なら対象は右側。
+// 距離は、AR.jsの内部座標が水平方向に伸びているため、GPSから計算した「実際のメートル」で出す。
+// 矢印は、対象がカメラの視野の外にあるときだけ、その側の画面の端に出る(視野の中に入ると消える)。
+// 近いとき(GPS精度の2倍、最低25m)は、方向がずれて見えることがある旨も案内する。
+const arrowL = document.getElementById('arrow-left');
+const arrowR = document.getElementById('arrow-right');
 setInterval(() => {
-  if (!lastFix || !placed) return;
+  const cam = cameraEl.getObject3D('camera');
+  if (!lastFix || !placed || !cam) { arrowL.classList.remove('on'); arrowR.classList.remove('on'); return; }
   const tgt = target || { lat: lastFix.lat + 0.0001, lng: lastFix.lng };
   const M = 111195;
-  const dist = Math.hypot((tgt.lat - lastFix.lat) * M, (tgt.lng - lastFix.lng) * M * Math.cos(lastFix.lat * Math.PI / 180));
+  const dN = (tgt.lat - lastFix.lat) * M;
+  const dE = (tgt.lng - lastFix.lng) * M * Math.cos(lastFix.lat * Math.PI / 180);
+  const dist = Math.hypot(dN, dE);
+  const bearing = (Math.atan2(dE, dN) * 180 / Math.PI + 360) % 360;
+  const dir = new THREE.Vector3();
+  cam.getWorldDirection(dir);
+  const heading = (Math.atan2(dir.x, -dir.z) * 180 / Math.PI + 360) % 360;
+  const hFix = (heading - appliedDelta + 720) % 360;
+  const diff = ((bearing - hFix + 540) % 360) - 180;          // -180〜180。+なら対象は右側
+
+  // テキスト(5°刻みに丸めて、ちらつきを抑える)
+  const a = Math.abs(diff);
+  const r5 = Math.round(a / 5) * 5;
+  const turn = a < 7 ? 'ほぼ正面' : a > 172 ? '真後ろ' : `${diff > 0 ? '右' : '左'}へ約${r5}°`;
   const near = Math.max(25, 2 * (gpsAcc ?? 15));
-  const el = document.getElementById('distance-display');
-  el.innerHTML = `対象まで 約${dist.toFixed(0)}m` +
+  document.getElementById('distance-display').innerHTML =
+    `対象まで 約${dist.toFixed(0)}m　<span class="turn">${turn}</span>` +
     (dist < near ? `<br><span style="font-size:13px; font-weight:normal;">すぐ近くです。GPSの誤差(±${gpsAcc === null ? '?' : gpsAcc.toFixed(0)}m)で、実際の位置と少しずれて見えることがあります。周りを見回してください</span>` : '');
-}, 300);
+
+  // 矢印: カメラの視野(水平)の外にあるときだけ、その側に出す
+  const hFov = 2 * Math.atan(Math.tan(cam.fov * Math.PI / 360) * (cam.aspect || 0.75)) * 180 / Math.PI;
+  const outside = a > (hFov / 2) * 0.9;
+  arrowR.classList.toggle('on', outside && diff > 0);
+  arrowL.classList.toggle('on', outside && diff < 0);
+}, 150);
 
 loadTarget().then(tryPlace);
 </script>
