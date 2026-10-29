@@ -10,16 +10,16 @@
 <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/three.js/build/ar-threex-location-only.js"></script>
 <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/aframe/build/aframe-ar.js"></script>
 <style>
-  :root { --holo: #C0A0FF; }   /* モデルに合わせた色(HoloMainのベースカラー)。変えるときはここだけ */
+  :root { --holo: #E8DEFF; }   /* モデルに合わせた、薄く淡い青紫。矢印・光・文字の色はここだけで変わる(元の濃さは #C0A0FF) */
   .edge-arrow { position: fixed; top: 50%; z-index: 600; pointer-events: none; opacity: 0; transform: translateY(-50%); transition: opacity .5s ease; }
   .edge-arrow.on { opacity: 1; }
   .edge-arrow.left { left: 6px; }
   .edge-arrow.right { right: 6px; }
   .edge-arrow svg { display: block; width: 44px; height: 60px; color: var(--holo);
-    filter: drop-shadow(0 0 6px var(--holo)) drop-shadow(0 0 14px rgba(192,160,255,.6));
+    filter: drop-shadow(0 0 5px var(--holo)) drop-shadow(0 0 10px var(--holo));
     animation: holoPulse 1.8s ease-in-out infinite; }
   .edge-arrow.left svg { transform: scaleX(-1); }
-  @keyframes holoPulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+  @keyframes holoPulse { 0%, 100% { opacity: .2; } 50% { opacity: .9; } }
   #distance-display .turn { color: var(--holo); }
 </style>
 </head>
