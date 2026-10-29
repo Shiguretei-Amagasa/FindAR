@@ -16,6 +16,19 @@
 <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
 <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/three.js/build/ar-threex-location-only.js"></script>
 <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/aframe/build/aframe-ar.js"></script>
+<style>
+  :root { --holo: #E8DEFF; }   /* モデルに合わせた、淡い青紫。矢印・光・文字の色はここだけで変わる(元の濃さは #C0A0FF) */
+  .edge-arrow { position: fixed; top: 50%; z-index: 600; pointer-events: none; opacity: 0; transform: translateY(-50%); transition: opacity .5s ease; }
+  .edge-arrow.on { opacity: 1; }
+  .edge-arrow.left { left: 6px; }
+  .edge-arrow.right { right: 6px; }
+  .edge-arrow svg { display: block; width: 44px; height: 60px; color: var(--holo);
+    filter: drop-shadow(0 0 5px var(--holo)) drop-shadow(0 0 10px var(--holo));
+    animation: holoPulse 1.8s ease-in-out infinite; }
+  .edge-arrow.left svg { transform: scaleX(-1); }
+  @keyframes holoPulse { 0%, 100% { opacity: .2; } 50% { opacity: .9; } }
+  #distance-display .turn { color: var(--holo); }
+</style>
 </head>
 <body style="margin:0; overflow:hidden; font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic', Meiryo, sans-serif;">
 
@@ -24,6 +37,10 @@
 </div>
 <div id="debug-display" style="display:none; position:fixed; bottom:96px; left:8px; right:8px; z-index:600; text-align:center; color:#fff; background:rgba(0,0,0,0.5); padding:4px 8px; font-family:sans-serif; font-size:12px; border-radius:6px;"></div>
 <div id="distance-display" style="position:fixed; bottom:16px; left:0; right:0; z-index:600; text-align:center; color:#fff; font-size:16px; font-weight:bold; text-shadow:0 1px 4px #000;"></div>
+
+<!-- 対象が視野の外にあるとき、その側の画面の端に出る矢印(モデルと同じ色で、脈動する) -->
+<div id="arrow-left" class="edge-arrow left"><svg viewBox="0 0 44 60"><polygon points="4,4 40,30 4,56" fill="currentColor"/></svg></div>
+<div id="arrow-right" class="edge-arrow right"><svg viewBox="0 0 44 60"><polygon points="4,4 40,30 4,56" fill="currentColor"/></svg></div>
 
 <!-- test.html で実機確認した内容を、そのまま viewer.html にしたもの。
      test.html との違いは「アニメーションを既定で再生する」点と、「状態表示・eruda・デバッグ表示を ?debug=1 のとき(エラーは常に)だけ出す」点のみ。
@@ -106,7 +123,7 @@ const BASE = num('base', 4);
 const ALPHA = num('alpha', 0.6);
 const SMIN = num('smin', 0.15);
 const SMAX = num('smax', 30);
-const HEIGHT = num('h', 6);
+const HEIGHT = num('h', 4);
 const EYE = num('eye', 1.6);
 const ANCHOR = params.get('anchor') === 'bottom' ? 'bottom' : 'center';
 const YAW = num('yaw', 0);
@@ -449,18 +466,43 @@ setInterval(() => {
     `<br>カメラ縦画角${cam.fov.toFixed(0)}° アスペクト${cam.aspect.toFixed(2)} / 画面${sceneEl.canvas ? sceneEl.canvas.clientWidth + '×' + sceneEl.canvas.clientHeight : '-'}`;
 }, 300);
 
-// 距離表示: AR.jsの内部座標は水平方向が伸びているため、GPSから計算した「実際のメートル」で表示する。
-// 近いとき(GPS精度の2倍、最低25m)は、方向がずれて見えることがある旨を案内する
+// ── 下部のテキスト(距離・向きのずれ)と、画面の端の矢印 ──
+// 向きのずれ = 対象の方角 − カメラの向き(補正後)。+なら対象は右側。
+// 距離は、AR.jsの内部座標が水平方向に伸びているため、GPSから計算した「実際のメートル」で出す。
+// 矢印は、対象がカメラの視野の外にあるときだけ、その側の画面の端に出る(視野の中に入ると消える)。
+// 近いとき(GPS精度の2倍、最低25m)は、方向がずれて見えることがある旨も案内する。
+const arrowL = document.getElementById('arrow-left');
+const arrowR = document.getElementById('arrow-right');
 setInterval(() => {
-  if (!lastFix || !placed) return;
+  const cam = cameraEl.getObject3D('camera');
+  if (!lastFix || !placed || !cam) { arrowL.classList.remove('on'); arrowR.classList.remove('on'); return; }
   const tgt = target || { lat: lastFix.lat + 0.0001, lng: lastFix.lng };
   const M = 111195;
-  const dist = Math.hypot((tgt.lat - lastFix.lat) * M, (tgt.lng - lastFix.lng) * M * Math.cos(lastFix.lat * Math.PI / 180));
+  const dN = (tgt.lat - lastFix.lat) * M;
+  const dE = (tgt.lng - lastFix.lng) * M * Math.cos(lastFix.lat * Math.PI / 180);
+  const dist = Math.hypot(dN, dE);
+  const bearing = (Math.atan2(dE, dN) * 180 / Math.PI + 360) % 360;
+  const dir = new THREE.Vector3();
+  cam.getWorldDirection(dir);
+  const heading = (Math.atan2(dir.x, -dir.z) * 180 / Math.PI + 360) % 360;
+  const hFix = (heading - appliedDelta + 720) % 360;
+  const diff = ((bearing - hFix + 540) % 360) - 180;          // -180〜180。+なら対象は右側
+
+  // テキスト(5°刻みに丸めて、ちらつきを抑える)
+  const a = Math.abs(diff);
+  const r5 = Math.round(a / 5) * 5;
+  const turn = a < 7 ? 'ほぼ正面' : a > 172 ? '真後ろ' : `${diff > 0 ? '右' : '左'}へ約${r5}°`;
   const near = Math.max(25, 2 * (gpsAcc ?? 15));
-  const el = document.getElementById('distance-display');
-  el.innerHTML = `対象まで 約${dist.toFixed(0)}m` +
+  document.getElementById('distance-display').innerHTML =
+    `対象まで 約${dist.toFixed(0)}m　<span class="turn">${turn}</span>` +
     (dist < near ? `<br><span style="font-size:13px; font-weight:normal;">すぐ近くです。GPSの誤差(±${gpsAcc === null ? '?' : gpsAcc.toFixed(0)}m)で、実際の位置と少しずれて見えることがあります。周りを見回してください</span>` : '');
-}, 300);
+
+  // 矢印: カメラの視野(水平)の外にあるときだけ、その側に出す
+  const hFov = 2 * Math.atan(Math.tan(cam.fov * Math.PI / 360) * (cam.aspect || 0.75)) * 180 / Math.PI;
+  const outside = a > (hFov / 2) * 0.9;
+  arrowR.classList.toggle('on', outside && diff > 0);
+  arrowL.classList.toggle('on', outside && diff < 0);
+}, 150);
 
 loadTarget().then(tryPlace);
 </script>
